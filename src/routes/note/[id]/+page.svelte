@@ -575,6 +575,8 @@
 				class="btn btn--sm"
 				href="{base}/api/attachments/{viewerAtt.id}?download=1"
 				download={viewerAtt.name}
+				target="_blank"
+				rel="noopener"
 			>
 				⬇ Download
 			</a>

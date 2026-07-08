@@ -177,7 +177,7 @@
 								<span class="muted file-meta">{fmtSize(f.size)} · {fmtDate(f.date)}{f.owner ? ` · ${f.owner}` : ''}</span>
 							</span>
 						</button>
-						<a class="btn btn--sm" href="/api/documents/{f.id}?download" title="Download" download>⬇</a>
+						<a class="btn btn--sm" href="/api/documents/{f.id}?download" title="Download" download target="_blank" rel="noopener">⬇</a>
 						<ConfirmButton label="🗑" confirmLabel="Sure?" onconfirm={() => archive(f.id)} />
 					</div>
 				{/each}
@@ -203,7 +203,13 @@
 	>
 		<div class="viewer-head">
 			<span class="viewer-name">{viewerFile.name}</span>
-			<a class="btn btn--sm" href="/api/documents/{viewerFile.id}?download" download={viewerFile.name}>
+			<a
+				class="btn btn--sm"
+				href="/api/documents/{viewerFile.id}?download"
+				download={viewerFile.name}
+				target="_blank"
+				rel="noopener"
+			>
 				⬇ Download
 			</a>
 			<button class="btn btn--sm" onclick={() => (viewerFile = null)}>✕</button>
