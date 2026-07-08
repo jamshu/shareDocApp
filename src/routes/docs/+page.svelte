@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
+	import { downloadFile } from '$lib/download.js';
 
 	let folders = $state([]); // flat: { id, name, parentId }
 	let currentId = $state(null); // null = root
@@ -110,6 +111,14 @@
 		}
 	}
 
+	async function download(f) {
+		try {
+			await downloadFile(`/api/documents/${f.id}?download`, f.name);
+		} catch (e) {
+			error = e.message;
+		}
+	}
+
 	const icon = (m) =>
 		m?.startsWith('image/') ? '🖼️'
 		: m === 'application/pdf' ? '📕'
@@ -177,7 +186,7 @@
 								<span class="muted file-meta">{fmtSize(f.size)} · {fmtDate(f.date)}{f.owner ? ` · ${f.owner}` : ''}</span>
 							</span>
 						</button>
-						<a class="btn btn--sm" href="/api/documents/{f.id}?download" title="Download" download target="_blank" rel="noopener">⬇</a>
+						<button class="btn btn--sm" title="Download" onclick={() => download(f)}>⬇</button>
 						<ConfirmButton label="🗑" confirmLabel="Sure?" onconfirm={() => archive(f.id)} />
 					</div>
 				{/each}
@@ -203,15 +212,7 @@
 	>
 		<div class="viewer-head">
 			<span class="viewer-name">{viewerFile.name}</span>
-			<a
-				class="btn btn--sm"
-				href="/api/documents/{viewerFile.id}?download"
-				download={viewerFile.name}
-				target="_blank"
-				rel="noopener"
-			>
-				⬇ Download
-			</a>
+			<button class="btn btn--sm" onclick={() => download(viewerFile)}>⬇ Download</button>
 			<button class="btn btn--sm" onclick={() => (viewerFile = null)}>✕</button>
 		</div>
 		{#if viewerFile.mimetype?.startsWith('image/')}

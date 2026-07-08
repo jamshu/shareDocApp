@@ -6,6 +6,7 @@
 	import { user } from '$lib/auth.js';
 	import { odooClient } from '$lib/odoo.js';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
+	import { downloadFile } from '$lib/download.js';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 	import TurndownService from 'turndown';
@@ -571,15 +572,15 @@
 	>
 		<div class="viewer-head">
 			<span class="viewer-name">{viewerAtt.name}</span>
-			<a
+			<button
 				class="btn btn--sm"
-				href="{base}/api/attachments/{viewerAtt.id}?download=1"
-				download={viewerAtt.name}
-				target="_blank"
-				rel="noopener"
+				onclick={() =>
+					downloadFile(`${base}/api/attachments/${viewerAtt.id}?download=1`, viewerAtt.name).catch(
+						(e) => (error = e.message)
+					)}
 			>
 				⬇ Download
-			</a>
+			</button>
 			<button class="btn btn--sm" onclick={() => (viewerAtt = null)}>✕</button>
 		</div>
 		{#if viewerAtt.mimetype?.startsWith('image/')}
