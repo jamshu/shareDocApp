@@ -9,6 +9,7 @@
 	let filesLoading = $state(false);
 	let uploading = $state(false);
 	let error = $state('');
+	let viewerFile = $state(null);
 
 	let children = $derived(folders.filter((f) => f.parentId === currentId));
 	let crumbs = $derived.by(() => {
@@ -169,13 +170,13 @@
 			<div class="file-list">
 				{#each files as f (f.id)}
 					<div class="card file-row fade-in">
-						<a class="file-main" href="/api/documents/{f.id}" target="_blank" rel="noopener">
+						<button class="file-main" onclick={() => (viewerFile = f)}>
 							<span class="emo">{icon(f.mimetype)}</span>
 							<span class="file-info">
 								<span class="file-name">{f.name}</span>
 								<span class="muted file-meta">{fmtSize(f.size)} · {fmtDate(f.date)}{f.owner ? ` · ${f.owner}` : ''}</span>
 							</span>
-						</a>
+						</button>
 						<a class="btn btn--sm" href="/api/documents/{f.id}?download" title="Download" download>⬇</a>
 						<ConfirmButton label="🗑" confirmLabel="Sure?" onconfirm={() => archive(f.id)} />
 					</div>
@@ -191,7 +192,76 @@
 	{/if}
 {/if}
 
+<svelte:window onkeydown={(e) => e.key === 'Escape' && (viewerFile = null)} />
+
+{#if viewerFile}
+	<div
+		class="viewer"
+		role="dialog"
+		aria-label={viewerFile.name}
+		onclick={(e) => e.target === e.currentTarget && (viewerFile = null)}
+	>
+		<div class="viewer-head">
+			<span class="viewer-name">{viewerFile.name}</span>
+			<a class="btn btn--sm" href="/api/documents/{viewerFile.id}?download" download={viewerFile.name}>
+				⬇ Download
+			</a>
+			<button class="btn btn--sm" onclick={() => (viewerFile = null)}>✕</button>
+		</div>
+		{#if viewerFile.mimetype?.startsWith('image/')}
+			<img class="viewer-body" src="/api/documents/{viewerFile.id}" alt={viewerFile.name} />
+		{:else if viewerFile.mimetype === 'application/pdf'}
+			<!-- ponytail: iOS iframe shows only page 1 of PDFs; Download covers the rest -->
+			<iframe class="viewer-body" src="/api/documents/{viewerFile.id}" title={viewerFile.name}
+			></iframe>
+		{:else}
+			<p class="viewer-none">No preview available — use Download.</p>
+		{/if}
+	</div>
+{/if}
+
 <style>
+	.viewer {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 12px;
+		padding-top: calc(12px + env(safe-area-inset-top));
+		background: rgba(0, 0, 0, 0.85);
+	}
+	.viewer-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.viewer-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: #fff;
+		font-size: 0.9rem;
+	}
+	.viewer-body {
+		flex: 1;
+		min-height: 0;
+		width: 100%;
+		object-fit: contain;
+		border: none;
+		border-radius: 10px;
+		background: #fff;
+	}
+	img.viewer-body {
+		background: transparent;
+	}
+	.viewer-none {
+		margin: auto;
+		color: #fff;
+	}
 	.head-row {
 		display: flex;
 		align-items: center;
@@ -267,8 +337,13 @@
 		gap: 10px;
 		flex: 1;
 		min-width: 0;
-		text-decoration: none;
 		color: var(--text);
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
 	}
 	.file-info {
 		display: flex;
