@@ -69,6 +69,22 @@
 	let followerIds = $state([]);
 	let groupIds = $state([]);
 
+	// reminders (Odoo activities + scheduled messages via /api/reminders)
+	let remOpen = $state(false);
+	let reminders = $state([]);
+	let remActivities = $state([]);
+	let remAudience = $state([]);
+	let remUserIds = $state([]);
+	let remWhen = $state('');
+	let remSummary = $state('');
+	let remFreq = $state('once');
+	let remCount = $state(30);
+	let remShown = $state(5);
+	let remBusy = $state(false);
+	let showDone = $state(false);
+
+	const FREQ_DEFAULT_COUNT = { daily: 30, weekly: 12, monthly: 12 };
+
 	// comments
 	let comments = $state([]);
 	let attachments = $state([]); // flat list, joined by commentId
@@ -100,7 +116,7 @@
 			// md notes saved before x_studio_notes_md existed only have the
 			// sanitizer-mangled html — turndown them back as a best effort
 			src = editorMode === 'md' ? n.x_studio_notes_md || toMarkdown(html) : html;
-			await Promise.all([loadComments(), loadShareData()]);
+			await Promise.all([loadComments(), loadShareData(), loadReminders()]);
 		} catch (e) {
 			error = e.message;
 		}
@@ -148,6 +164,116 @@
 	function toggleGroup(id) {
 		groupIds = groupIds.includes(id) ? groupIds.filter((g) => g !== id) : [...groupIds, id];
 		scheduleSave({ x_studio_group_ids: m2m(groupIds) });
+	}
+
+	/* ── reminders ───────────────────────────────────────────────────── */
+	async function loadReminders() {
+		const res = await fetch(`${base}/api/reminders?noteId=${noteId}`);
+		const d = await res.json();
+		if (!d.ok) return; // panel just stays empty on failure
+		reminders = d.reminders;
+		remActivities = d.activities;
+		remAudience = d.audience;
+	}
+
+	// datetime-local min: local "now" in the input's own format
+	const localMin = () =>
+		new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+	function toggleRemUser(id) {
+		remUserIds = remUserIds.includes(id)
+			? remUserIds.filter((u) => u !== id)
+			: [...remUserIds, id];
+	}
+
+	// the assignee's activity for one occurrence (done ones are archived, not
+	// deleted, so they still resolve here); missing = done (legacy/cancelled).
+	// Resolve by the row's own activity ids — same-day reminders share deadline
+	// dates, so date matching would tie one tick to every reminder that day.
+	// Date fallback only for reminders created before act-id tracking.
+	const occActivity = (userId, r) =>
+		r.activityIds?.length
+			? remActivities.find((a) => a.userId === userId && r.activityIds.includes(a.id))
+			: remActivities.find((a) => a.userId === userId && a.deadline === String(r.when).slice(0, 10));
+	const actState = (userId, r) => {
+		const a = occActivity(userId, r);
+		return !a || a.done ? 'done' : a.state;
+	};
+	// your own tick hides the reminder for you; non-assignees keep seeing it
+	// until every assignee is done
+	const doneForMe = (r) =>
+		r.users.some((u) => u.id === $user?.uid)
+			? actState($user?.uid, r) === 'done'
+			: r.users.length > 0 && r.users.every((u) => actState(u.id, r) === 'done');
+	let remPending = $derived(reminders.filter((r) => !doneForMe(r)));
+	let remDone = $derived(reminders.filter((r) => doneForMe(r)));
+
+	function setFreq(f) {
+		remFreq = f;
+		remCount = FREQ_DEFAULT_COUNT[f] || 1;
+	}
+
+	async function addReminder() {
+		if (!remWhen || !remUserIds.length || remBusy) return;
+		remBusy = true;
+		error = '';
+		try {
+			const res = await fetch(`${base}/api/reminders`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					noteId,
+					userIds: remUserIds,
+					when: new Date(remWhen).toISOString(),
+					summary: remSummary.trim(),
+					frequency: remFreq,
+					count: remCount
+				})
+			});
+			const d = await res.json();
+			if (!d.ok) throw new Error(d.error || 'Failed to set reminder');
+			remWhen = '';
+			remSummary = '';
+			remUserIds = [];
+			remFreq = 'once';
+			await loadReminders();
+		} catch (e) {
+			error = e.message;
+		} finally {
+			remBusy = false;
+		}
+	}
+
+	async function markDone(activityId, undone = false) {
+		error = '';
+		try {
+			const res = await fetch(`${base}/api/reminders`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ noteId, activityId, undone })
+			});
+			const d = await res.json();
+			if (!d.ok) throw new Error(d.error || 'Failed to mark done');
+			await loadReminders();
+		} catch (e) {
+			error = e.message;
+		}
+	}
+
+	async function cancelReminder(messageId, series = false) {
+		error = '';
+		try {
+			const res = await fetch(`${base}/api/reminders`, {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ noteId, messageId, series })
+			});
+			const d = await res.json();
+			if (!d.ok) throw new Error(d.error || 'Failed to cancel reminder');
+			await loadReminders();
+		} catch (e) {
+			error = e.message;
+		}
 	}
 
 	/* ── comments ────────────────────────────────────────────────────── */
@@ -265,7 +391,33 @@
 	}
 
 	const fmtWhen = (d) => (d ? new Date(d + 'Z').toLocaleString() : '');
+	// fired reminders only carry a date (the exact time went with the consumed
+	// scheduled message) — format it as-is, no timezone shift
+	const fmtRemWhen = (r) =>
+		r.fired
+			? new Date(r.when + 'T00:00:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' })
+			: fmtWhen(r.when);
 	const commentAtts = (cid) => attachments.filter((a) => a.commentId === cid);
+
+	// comments are editable/deletable only briefly, so histories stay honest;
+	// the server enforces the same window
+	const COMMENT_EDIT_WINDOW_MS = 5 * 60 * 1000;
+	let now = $state(Date.now());
+	$effect(() => {
+		const t = setInterval(() => (now = Date.now()), 1000);
+		return () => clearInterval(t);
+	});
+	// 'T' instead of the raw space — Safari won't parse "YYYY-MM-DD HH:MM:SSZ"
+	const commentTs = (c) => new Date(String(c.create_date).replace(' ', 'T') + 'Z').getTime();
+	const canModify = (c) =>
+		c.create_uid?.[0] === $user?.uid && now - commentTs(c) < COMMENT_EDIT_WINDOW_MS;
+	// m:ss left to edit/delete, shown as a live countdown next to the buttons
+	const editCountdown = (c) => {
+		const left = COMMENT_EDIT_WINDOW_MS - (now - commentTs(c));
+		if (left <= 0) return '';
+		const s = Math.ceil(left / 1000);
+		return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+	};
 
 	/* ── markdown toolbar ────────────────────────────────────────────── */
 	// wrap: surrounds the selection; prefix: prepends each selected line
@@ -357,6 +509,9 @@
 		<span class="sync muted">
 			{#if syncState === 'saving'}saving…{:else if syncState === 'saved'}saved ✓{:else if syncState === 'error'}save failed{/if}
 		</span>
+		<button class="btn btn--sm" onclick={() => (remOpen = !remOpen)}>
+			⏰ {remPending.length || ''}
+		</button>
 		{#if isOwner}
 			<button class="btn btn--sm" onclick={() => (shareOpen = !shareOpen)}>
 				Share ({followerIds.length + groupIds.length})
@@ -407,6 +562,119 @@
 					>{g.x_name}</button>
 				{/each}
 			</div>
+		</div>
+	{/if}
+
+	{#if remOpen}
+		<div class="card share-panel fade-in">
+			<div class="label" style="margin-top:0;">New reminder</div>
+			<div class="rem-form">
+				<input class="input" type="datetime-local" min={localMin()} bind:value={remWhen} />
+				<input
+					class="input rem-summary"
+					placeholder="What to remind about (optional)"
+					bind:value={remSummary}
+				/>
+			</div>
+			<div class="rem-form" style="margin-top:8px;">
+				<select class="select" value={remFreq} onchange={(e) => setFreq(e.target.value)}>
+					<option value="once">Once</option>
+					<option value="daily">Daily</option>
+					<option value="weekly">Weekly</option>
+					<option value="monthly">Monthly</option>
+				</select>
+				{#if remFreq !== 'once'}
+					<label class="rem-count muted">
+						repeat
+						<input class="input" type="number" min="1" max="30" bind:value={remCount} />
+						times
+					</label>
+				{/if}
+			</div>
+			<div class="label">Remind</div>
+			<div class="picker">
+				{#each remAudience as u (u.id)}
+					<button
+						class="chip {remUserIds.includes(u.id) ? 'chip--accent' : ''}"
+						onclick={() => toggleRemUser(u.id)}
+					>{u.name}</button>
+				{/each}
+			</div>
+			<div class="edit-row">
+				<button
+					class="btn btn--primary btn--sm"
+					disabled={remBusy || !remWhen || !remUserIds.length}
+					onclick={addReminder}
+				>
+					{remBusy ? 'Saving…' : 'Set reminder'}
+				</button>
+			</div>
+
+			{#snippet remRow(r)}
+				<div class="rem-row {doneForMe(r) ? 'rem-row--done' : ''} {r.fired ? 'rem-row--fired' : ''}">
+					{#if r.fired}<span class="sent-ribbon">sent</span>{/if}
+					<div class="rem-info">
+						<strong>{fmtRemWhen(r)}</strong>
+						{#if r.frequency}<span class="chip chip--green">{r.frequency}</span>{/if}
+						<span class="muted">{r.subject}</span>
+						<div class="picker">
+							{#each r.users as u (u.id)}
+								{@const a = occActivity(u.id, r)}
+								{#if u.id === $user?.uid && a && !a.done}
+									<button
+										class="chip"
+										title="Mark done"
+										onclick={() => markDone(a.id)}
+									>☐ {u.name} · {a.state}</button>
+								{:else if u.id === $user?.uid && a && a.done}
+									<button
+										class="chip chip--green"
+										title="Mark not done — the reminder becomes visible again"
+										onclick={() => markDone(a.id, true)}
+									>✓ {u.name} · undo</button>
+								{:else}
+									<span class="chip {actState(u.id, r) === 'done' ? 'chip--green' : ''}">
+										{actState(u.id, r) === 'done' ? '✓' : ''} {u.name} · {actState(u.id, r)}
+									</span>
+								{/if}
+							{/each}
+						</div>
+					</div>
+					{#if !r.fired}
+						<div class="rem-actions">
+							<ConfirmButton onconfirm={() => cancelReminder(r.id)} label="✕" />
+							{#if r.seriesKey}
+								<ConfirmButton onconfirm={() => cancelReminder(r.id, true)} label="✕ series" confirmLabel="All?" />
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{/snippet}
+
+			{#if remPending.length}
+				<div class="label">Scheduled ({remPending.length})</div>
+				{#each remPending.slice(0, remShown) as r (r.id)}
+					{@render remRow(r)}
+				{/each}
+				{#if remPending.length > remShown}
+					<button class="btn btn--sm" style="margin-top:8px;" onclick={() => (remShown += 10)}>
+						Show more ({remPending.length - remShown} more)
+					</button>
+				{/if}
+			{:else}
+				<p class="muted" style="margin-top:10px;">No reminders yet.</p>
+			{/if}
+
+			{#if remDone.length}
+				<button class="btn btn--sm btn--ghost" style="margin-top:10px;" onclick={() => (showDone = !showDone)}>
+					{showDone ? 'Hide done' : `Show done (${remDone.length})`}
+				</button>
+				{#if showDone}
+					{#each remDone as r (r.id)}
+						{@render remRow(r)}
+					{/each}
+				{/if}
+			{/if}
 		</div>
 	{/if}
 
@@ -500,13 +768,17 @@
 			<div class="comment-head">
 				<strong>{c.create_uid?.[1]}</strong>
 				<span class="muted">{fmtWhen(c.create_date)}</span>
-				{#if c.create_uid?.[0] === $user?.uid}
+				<!-- edit/delete close after 5 minutes; keep Cancel reachable mid-edit -->
+				{#if canModify(c) || editingId === c.id}
 					<div class="comment-actions">
 						{#if editingId === c.id}
 							<button class="btn btn--sm btn--ghost" onclick={() => (editingId = null)}>
 								Cancel
 							</button>
 						{:else}
+							<span class="muted comment-timer" title="Time left to edit or delete">
+								⏳ {editCountdown(c)}
+							</span>
 							<button class="btn btn--sm btn--ghost" onclick={() => startEdit(c)}>Edit</button>
 							<ConfirmButton onconfirm={() => deleteComment(c.id)} />
 						{/if}
@@ -655,6 +927,69 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
+	}
+	.rem-form {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.rem-summary {
+		flex: 1 1 180px;
+		min-width: 0;
+	}
+	.rem-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+		padding: 10px 0 4px;
+		border-top: 1px solid var(--border);
+		margin-top: 10px;
+	}
+	.rem-row--done {
+		opacity: 0.65;
+	}
+	/* fired rows: clip the corner ribbon; padding keeps text from under it */
+	.rem-row--fired {
+		position: relative;
+		overflow: hidden;
+		padding-right: 48px;
+	}
+	.sent-ribbon {
+		position: absolute;
+		top: 12px;
+		right: -30px;
+		transform: rotate(45deg);
+		background: #d64545;
+		color: #fff;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		padding: 3px 32px;
+		pointer-events: none;
+		box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+	}
+	.rem-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.rem-actions {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		align-items: flex-end;
+	}
+	.rem-count {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 0.85rem;
+	}
+	.rem-count input {
+		width: 64px;
 	}
 	.title-input {
 		width: 100%;
@@ -834,6 +1169,12 @@
 		display: flex;
 		gap: 6px;
 		margin-left: auto;
+		align-items: center;
+	}
+	.comment-timer {
+		font-size: 0.8rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 	.edit-row {
 		display: flex;

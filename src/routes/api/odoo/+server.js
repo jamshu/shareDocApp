@@ -4,7 +4,7 @@
 // approval gate, company hard-scoping, and push notifications on share/comment.
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { assertConfigured, sessionCallKw, adminExecute } from '$lib/server/odoo.js';
+import { assertConfigured, sessionCallKw, adminExecute, noteVisibilityDomain } from '$lib/server/odoo.js';
 import { requireApprovedUser } from '$lib/server/auth.js';
 import { clearSessionCookie, refreshSessionCookie } from '$lib/server/session.js';
 import { notifyNoteShared, notifyComment } from '$lib/server/notify.js';
@@ -19,6 +19,11 @@ const MODELS = () => ({
 });
 
 const stripHtml = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+// comments are mutable only briefly after posting — history must stay honest
+const COMMENT_EDIT_WINDOW_MS = 5 * 60 * 1000;
+// Odoo datetimes are naive UTC "YYYY-MM-DD HH:MM:SS"
+const odooTs = (d) => Date.parse(String(d).replace(' ', 'T') + 'Z');
 
 /** Followers a note resolves to right now (direct + via groups) — for share diffing. */
 async function currentFollowerSet(model, noteId) {
@@ -83,19 +88,15 @@ export async function POST({ request, cookies }) {
 				const { domain = [], fields = [], order, limit } = data || {};
 				// Hard-scope to the user's own tenant so a loose/misconfigured record
 				// rule can never leak another company's rows into the app.
-				const scope = companyId
-					? [['x_studio_company_id', '=', companyId]]
-					: [['create_uid', '=', uid]];
 				// Visibility hard-scope: notes/comments are private to owner +
 				// followers + group members even if the Odoo record rules are loose.
-				if (modelKey === 'notes') {
-					scope.push(
-						'|', '|',
-						['create_uid', '=', uid],
-						['x_studio_follower_ids', 'in', [uid]],
-						['x_studio_group_ids.x_studio_member_ids', 'in', [uid]]
-					);
-				} else if (modelKey === 'comments') {
+				const scope =
+					modelKey === 'notes'
+						? noteVisibilityDomain(uid, companyId)
+						: companyId
+							? [['x_studio_company_id', '=', companyId]]
+							: [['create_uid', '=', uid]];
+				if (modelKey === 'comments') {
 					scope.push(
 						'|', '|',
 						['x_studio_note_id.create_uid', '=', uid],
@@ -116,11 +117,19 @@ export async function POST({ request, cookies }) {
 				const { id, values } = data;
 
 				// comments may only be edited by their author (record rules alone
-				// don't guarantee this, so enforce it here)
+				// don't guarantee this, so enforce it here), and only briefly
 				if (modelKey === 'comments') {
-					const [rec] = await call(MODEL, 'read', [[Number(id)]], { fields: ['create_uid'] });
+					const [rec] = await call(MODEL, 'read', [[Number(id)]], {
+						fields: ['create_uid', 'create_date']
+					});
 					if (rec?.create_uid?.[0] !== uid) {
 						return json({ success: false, error: 'Not your comment' }, { status: 403 });
+					}
+					if (Date.now() - odooTs(rec.create_date) > COMMENT_EDIT_WINDOW_MS) {
+						return json(
+							{ success: false, error: 'Comments can only be edited within 5 minutes of posting' },
+							{ status: 403 }
+						);
 					}
 					if (values.x_studio_body) {
 						values.x_name = stripHtml(values.x_studio_body).slice(0, 60) || 'Comment';
@@ -154,7 +163,9 @@ export async function POST({ request, cookies }) {
 				const { id } = data;
 				// only the author may delete a comment, only the owner may delete a note
 				if (modelKey === 'comments' || modelKey === 'notes') {
-					const [rec] = await call(MODEL, 'read', [[Number(id)]], { fields: ['create_uid'] });
+					const [rec] = await call(MODEL, 'read', [[Number(id)]], {
+						fields: ['create_uid', 'create_date']
+					});
 					if (rec?.create_uid?.[0] !== uid) {
 						return json(
 							{
@@ -162,6 +173,15 @@ export async function POST({ request, cookies }) {
 								error:
 									modelKey === 'comments' ? 'Not your comment' : 'Only the owner can delete a note'
 							},
+							{ status: 403 }
+						);
+					}
+					if (
+						modelKey === 'comments' &&
+						Date.now() - odooTs(rec.create_date) > COMMENT_EDIT_WINDOW_MS
+					) {
+						return json(
+							{ success: false, error: 'Comments can only be deleted within 5 minutes of posting' },
 							{ status: 403 }
 						);
 					}
