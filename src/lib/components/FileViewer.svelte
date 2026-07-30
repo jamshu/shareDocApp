@@ -1,0 +1,67 @@
+<script>
+	import Modal from './Modal.svelte';
+	import { Download } from 'lucide-svelte';
+	import { downloadFile } from '$lib/download.js';
+	import { toast } from '$lib/toast.js';
+
+	// file: { name, mimetype } — set to null to close. href/downloadHref are the
+	// caller's api routes, since documents and attachments live behind different ones.
+	let { file = $bindable(null), href = '', downloadHref = '' } = $props();
+
+	async function save() {
+		try {
+			await downloadFile(downloadHref, file.name);
+		} catch (e) {
+			toast.error(e.message);
+		}
+	}
+</script>
+
+<Modal bind:open={() => !!file, (v) => { if (!v) file = null; }} fullscreen>
+	{#snippet header()}
+		<span class="name">{file?.name}</span>
+		<button class="btn btn--sm btn--secondary" onclick={save}><Download size={15} /> Download</button>
+	{/snippet}
+	{#if file?.mimetype?.startsWith('image/')}
+		<img class="body" src={href} alt={file.name} />
+	{:else if file?.mimetype === 'application/pdf'}
+		<!-- ponytail: iOS iframe shows only page 1 of PDFs; Download covers the rest -->
+		<iframe class="body" src={href} title={file.name}></iframe>
+	{:else}
+		<p class="none">No preview available — use Download.</p>
+	{/if}
+</Modal>
+
+<style>
+	.name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: var(--fs-md);
+		font-weight: 600;
+	}
+	/* fit to the viewport in both directions: width:100% would upscale small
+	   images, and on a tall one it forces the box wide so max-height squashes it */
+	img.body {
+		max-width: 100%;
+		max-height: 100%;
+		width: auto;
+		height: auto;
+		object-fit: contain;
+	}
+	/* object-fit does nothing on an iframe — it just fills the flex area */
+	iframe.body {
+		flex: 1;
+		min-height: 0;
+		width: 100%;
+		border: none;
+		background: #fff;
+	}
+	.none {
+		margin: auto;
+		padding: var(--space-8);
+		color: #fff;
+	}
+</style>

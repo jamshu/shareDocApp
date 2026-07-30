@@ -6,7 +6,8 @@
 	import { user } from '$lib/auth.js';
 	import { odooClient } from '$lib/odoo.js';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
-	import { downloadFile } from '$lib/download.js';
+	import FileViewer from '$lib/components/FileViewer.svelte';
+	import { toast } from '$lib/toast.js';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 	import TurndownService from 'turndown';
@@ -29,15 +30,45 @@
 	let rendered = $derived(DOMPurify.sanitize(editorMode === 'md' ? marked.parse(src) : src));
 
 	let turndown;
-	function toMarkdown(s) {
-		if (!/^\s*</.test(s)) return s;
-		turndown ??= new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
-		return turndown.turndown(s);
+	function td() {
+		// core turndown has no rule for the tags the rich-text toolbar emits below —
+		// without keep() it silently drops them and leaves only the text behind.
+		// markdown allows inline html, marked renders it back, DOMPurify sanitises it.
+		turndown ??= new TurndownService({
+			headingStyle: 'atx',
+			codeBlockStyle: 'fenced',
+			bulletListMarker: '-',
+			emDelimiter: '*'
+		})
+			.keep(['u', 's', 'strike', 'del', 'mark', 'sub', 'sup', 'table'])
+			// the colour/highlight pickers emit <span style="color:…"> or <font color>
+			// depending on browser; keep only those, not every contenteditable wrapper
+			.addRule('coloredInline', {
+				filter: (n) =>
+					(n.nodeName === 'SPAN' || n.nodeName === 'FONT') &&
+					!!(n.getAttribute('color') || /color/i.test(n.getAttribute('style') || '')),
+				replacement: (_content, node) => node.outerHTML
+			})
+			// turndown only fences <pre><code>; the toolbar's formatBlock <pre> emits a
+			// bare <pre>, which would otherwise degrade to a plain paragraph
+			.addRule('barePre', {
+				filter: (n) => n.nodeName === 'PRE' && !n.querySelector('code'),
+				replacement: (_content, node) =>
+					'\n\n```\n' + node.textContent.replace(/\n+$/, '') + '\n```\n\n'
+			});
+		return turndown;
 	}
+
+	const htmlToMarkdown = (html) => td().turndown(html);
+
+	// legacy load path only: x_studio_notes may hold raw markdown from before
+	// x_studio_notes_md existed, so sniff before turndowning. never use this on
+	// contenteditable output — its innerHTML routinely starts with a bare text node.
+	const sniffToMarkdown = (s) => (/^\s*</.test(s) ? htmlToMarkdown(s) : s);
 
 	function switchMode(to) {
 		if (to === editorMode) return;
-		src = to === 'md' ? toMarkdown(src) : marked.parse(src);
+		src = to === 'md' ? htmlToMarkdown(src) : marked.parse(src);
 		editorMode = to;
 		saveBody();
 	}
@@ -60,6 +91,49 @@
 			bodyEl.innerHTML = src;
 			bodyEl.dataset.filled = '1';
 		}
+	});
+
+	/* ── code block copy buttons ─────────────────────────────────────── */
+	// decorated in the DOM after render rather than via a marked renderer, because
+	// saveBody() runs the same marked.parse() and would persist the buttons to Odoo.
+	let mdViewEl = $state(null);
+
+	// read at click time off a clone, so the text can never go stale if svelte
+	// reuses a <pre> across renders, and the button label never lands in the
+	// clipboard. fenced markdown gives <pre><code>; the toolbar gives a bare <pre>
+	function codeTextOf(pre) {
+		const clone = pre.cloneNode(true);
+		clone.querySelector('.code-copy')?.remove();
+		return (clone.querySelector('code') ?? clone).textContent.replace(/\n$/, '');
+	}
+
+	async function copyCode(btn, pre) {
+		try {
+			await navigator.clipboard.writeText(codeTextOf(pre));
+			btn.textContent = 'Copied';
+			setTimeout(() => (btn.textContent = 'Copy'), 1500);
+		} catch {
+			toast.error('Could not copy');
+		}
+	}
+
+	function decorateCodeBlocks(el) {
+		for (const pre of el.querySelectorAll('pre')) {
+			if (pre.querySelector('.code-copy')) continue;
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'code-copy';
+			btn.textContent = 'Copy';
+			btn.addEventListener('click', () => copyCode(btn, pre));
+			// append inside the <pre> — never wrap it. <pre> is often a top-level child
+			// of the {@html} region, whose node range Svelte tracks for teardown.
+			pre.appendChild(btn);
+		}
+	}
+
+	$effect(() => {
+		rendered; // re-decorate whenever the rendered html is replaced
+		if (mdViewEl) decorateCodeBlocks(mdViewEl);
 	});
 
 	// share panel
@@ -88,7 +162,7 @@
 	// comments
 	let comments = $state([]);
 	let attachments = $state([]); // flat list, joined by commentId
-	let viewerAtt = $state(null); // attachment open in the in-app viewer overlay
+	let viewerAtt = $state(null); // attachment open in the FileViewer
 	let commentText = $state('');
 	let commentFiles = $state(null);
 	let commenting = $state(false);
@@ -115,7 +189,7 @@
 				n.x_studio_editor_mode || (html.trim() && !/^\s*</.test(html) ? 'md' : 'html');
 			// md notes saved before x_studio_notes_md existed only have the
 			// sanitizer-mangled html — turndown them back as a best effort
-			src = editorMode === 'md' ? n.x_studio_notes_md || toMarkdown(html) : html;
+			src = editorMode === 'md' ? n.x_studio_notes_md || sniffToMarkdown(html) : html;
 			await Promise.all([loadComments(), loadShareData(), loadReminders()]);
 		} catch (e) {
 			error = e.message;
@@ -755,7 +829,7 @@
 		{/if}
 	{:else if src.trim()}
 		<!-- eslint-disable-next-line svelte/no-at-html-tags — sanitized with DOMPurify above -->
-		<div class="richtext md-view">{@html rendered}</div>
+		<div class="richtext md-view" bind:this={mdViewEl}>{@html rendered}</div>
 	{:else}
 		<div class="richtext md-view muted">
 			{canEdit ? 'Empty note — tap Edit to write.' : 'Empty note.'}
@@ -833,82 +907,13 @@
 	<p class="muted" style="margin-top:40px;">Loading…</p>
 {/if}
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (viewerAtt = null)} />
-
-{#if viewerAtt}
-	<div
-		class="viewer"
-		role="dialog"
-		aria-label={viewerAtt.name}
-		onclick={(e) => e.target === e.currentTarget && (viewerAtt = null)}
-	>
-		<div class="viewer-head">
-			<span class="viewer-name">{viewerAtt.name}</span>
-			<button
-				class="btn btn--sm"
-				onclick={() =>
-					downloadFile(`${base}/api/attachments/${viewerAtt.id}?download=1`, viewerAtt.name).catch(
-						(e) => (error = e.message)
-					)}
-			>
-				⬇ Download
-			</button>
-			<button class="btn btn--sm" onclick={() => (viewerAtt = null)}>✕</button>
-		</div>
-		{#if viewerAtt.mimetype?.startsWith('image/')}
-			<img class="viewer-body" src="{base}/api/attachments/{viewerAtt.id}" alt={viewerAtt.name} />
-		{:else if viewerAtt.mimetype === 'application/pdf'}
-			<!-- ponytail: iOS iframe shows only page 1 of PDFs; Download covers the rest -->
-			<iframe class="viewer-body" src="{base}/api/attachments/{viewerAtt.id}" title={viewerAtt.name}
-			></iframe>
-		{:else}
-			<p class="viewer-none">No preview available — use Download.</p>
-		{/if}
-	</div>
-{/if}
+<FileViewer
+	bind:file={viewerAtt}
+	href="{base}/api/attachments/{viewerAtt?.id}"
+	downloadHref="{base}/api/attachments/{viewerAtt?.id}?download=1"
+/>
 
 <style>
-	.viewer {
-		position: fixed;
-		inset: 0;
-		z-index: 50;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		padding: 12px;
-		padding-top: calc(12px + env(safe-area-inset-top));
-		background: rgba(0, 0, 0, 0.85);
-	}
-	.viewer-head {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-	.viewer-name {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		color: #fff;
-		font-size: 0.9rem;
-	}
-	.viewer-body {
-		flex: 1;
-		min-height: 0;
-		width: 100%;
-		object-fit: contain;
-		border: none;
-		border-radius: 10px;
-		background: #fff;
-	}
-	img.viewer-body {
-		background: transparent;
-	}
-	.viewer-none {
-		margin: auto;
-		color: #fff;
-	}
 	.head-row {
 		display: flex;
 		align-items: center;
@@ -1152,6 +1157,31 @@
 	}
 	.richtext :global(a) {
 		color: var(--accent);
+	}
+	/* scoped to .md-view, not .richtext — .richtext is shared with the
+	   contenteditable editor, which must not get the copy button layout */
+	.md-view :global(pre) {
+		position: relative;
+		padding-right: 64px;
+	}
+	.md-view :global(.code-copy) {
+		position: absolute;
+		top: 6px;
+		right: 6px;
+		padding: 3px 8px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--surface);
+		color: var(--text-dim);
+		font-family: inherit;
+		font-size: var(--fs-xs);
+		line-height: 1.4;
+		cursor: pointer;
+		user-select: none; /* keep the label out of a select-all copy */
+	}
+	.md-view :global(.code-copy:hover) {
+		border-color: var(--border-strong);
+		color: var(--text);
 	}
 	.comment {
 		padding: 14px 16px;

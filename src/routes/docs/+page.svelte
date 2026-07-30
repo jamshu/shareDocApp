@@ -1,6 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
+	import FileViewer from '$lib/components/FileViewer.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 	import { downloadFile } from '$lib/download.js';
@@ -33,10 +33,12 @@
 	let uploading = $state(false);
 	let error = $state('');
 	let viewerFile = $state(null);
-	let menuId = $state(null); // folder id whose kebab menu is open
+	// folder and file ids are separate spaces, so the open menu is namespaced: d:<id> / f:<id>
+	let menuId = $state(null);
 	let renaming = $state(null); // item ({id,name}) being renamed
 	let renameValue = $state('');
 	let renameSaving = $state(false);
+	let deleting = $state(null); // file pending delete confirmation
 
 	let children = $derived(folders.filter((f) => f.parentId === currentId));
 	let myFolders = $derived(children.filter((f) => !f.shared)); // private = My Drive
@@ -133,7 +135,10 @@
 		}
 	}
 
-	async function archive(id) {
+	async function archive() {
+		const id = deleting?.id;
+		deleting = null;
+		if (!id) return;
 		try {
 			await api(`/api/documents/${id}`, { method: 'DELETE' });
 			files = files.filter((f) => f.id !== id);
@@ -236,7 +241,7 @@
 {#if error}<p class="error-text">{error}</p>{/if}
 
 {#snippet folderCard(f, i)}
-	<div class="card card--interactive folder-card fade-in" class:menu-open={menuId === f.id} style="--fade-delay: {i * 0.03}s">
+	<div class="card card--interactive folder-card fade-in" class:menu-open={menuId === `d:${f.id}`} style="--fade-delay: {i * 0.03}s">
 		<button class="folder-main" onclick={() => open(f.id)}>
 			<Folder size={19} class="folder-ic" />
 			<span class="folder-name">{f.name}</span>
@@ -249,9 +254,9 @@
 				aria-label="More actions"
 				onclick={(e) => {
 					e.stopPropagation();
-					menuId = menuId === f.id ? null : f.id;
+					menuId = menuId === `d:${f.id}` ? null : `d:${f.id}`;
 				}}><MoreVertical size={17} /></button>
-			{#if menuId === f.id}
+			{#if menuId === `d:${f.id}`}
 				<div class="menu" role="menu">
 					<button class="menu-item" onclick={(e) => { e.stopPropagation(); menuId = null; rename(f); }}><Pencil size={15} /> Rename</button>
 					{#if f.mine}
@@ -267,7 +272,7 @@
 
 {#snippet fileRow(f)}
 	{@const Icon = fileIcon(f.mimetype)}
-	<div class="card card--interactive file-row fade-in">
+	<div class="card card--interactive file-row fade-in" class:menu-open={menuId === `f:${f.id}`}>
 		<button class="file-main" onclick={() => (viewerFile = f)}>
 			<span class="file-ic"><Icon size={18} /></span>
 			<span class="file-info">
@@ -275,9 +280,23 @@
 				<span class="file-meta mono">{fmtSize(f.size)} · {fmtDate(f.date)}{f.owner ? ` · ${f.owner}` : ''}</span>
 			</span>
 		</button>
-		<button class="row-btn" title="Rename" aria-label="Rename" onclick={() => rename(f)}><Pencil size={16} /></button>
 		<button class="row-btn" title="Download" aria-label="Download" onclick={() => download(f)}><Download size={16} /></button>
-		<ConfirmButton label="Delete" confirmLabel="Sure?" onconfirm={() => archive(f.id)} />
+		<div class="file-actions">
+			<button
+				class="kebab"
+				title="More"
+				aria-label="More actions"
+				onclick={(e) => {
+					e.stopPropagation();
+					menuId = menuId === `f:${f.id}` ? null : `f:${f.id}`;
+				}}><MoreVertical size={17} /></button>
+			{#if menuId === `f:${f.id}`}
+				<div class="menu" role="menu">
+					<button class="menu-item" onclick={(e) => { e.stopPropagation(); menuId = null; rename(f); }}><Pencil size={15} /> Rename</button>
+					<button class="menu-item menu-item--danger" onclick={(e) => { e.stopPropagation(); menuId = null; deleting = f; }}><Trash2 size={15} /> Delete</button>
+				</div>
+			{/if}
+		</div>
 	</div>
 {/snippet}
 
@@ -365,47 +384,21 @@
 	</div>
 </Modal>
 
-<Modal bind:open={() => !!viewerFile, (v) => { if (!v) viewerFile = null; }} fullscreen>
-	{#snippet header()}
-		<span class="viewer-name">{viewerFile?.name}</span>
-		<button class="btn btn--sm btn--secondary" onclick={() => download(viewerFile)}><Download size={15} /> Download</button>
-	{/snippet}
-	{#if viewerFile?.mimetype?.startsWith('image/')}
-		<img class="viewer-body" src="/api/documents/{viewerFile.id}" alt={viewerFile.name} />
-	{:else if viewerFile?.mimetype === 'application/pdf'}
-		<!-- ponytail: iOS iframe shows only page 1 of PDFs; Download covers the rest -->
-		<iframe class="viewer-body" src="/api/documents/{viewerFile.id}" title={viewerFile.name}></iframe>
-	{:else}
-		<p class="viewer-none">No preview available — use Download.</p>
-	{/if}
+<Modal bind:open={() => !!deleting, (v) => { if (!v) deleting = null; }} title="Delete file">
+	<p>Delete <strong>{deleting?.name}</strong>?</p>
+	<div class="modal-actions">
+		<button class="btn btn--secondary" onclick={() => (deleting = null)}>Cancel</button>
+		<button class="btn btn--danger" onclick={archive}>Delete</button>
+	</div>
 </Modal>
 
+<FileViewer
+	bind:file={viewerFile}
+	href="/api/documents/{viewerFile?.id}"
+	downloadHref="/api/documents/{viewerFile?.id}?download"
+/>
+
 <style>
-	.viewer-name {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: var(--fs-md);
-		font-weight: 600;
-	}
-	.viewer-body {
-		width: 100%;
-		max-height: 92vh;
-		object-fit: contain;
-		border: none;
-		background: #000;
-	}
-	iframe.viewer-body {
-		height: 92vh;
-		background: #fff;
-	}
-	.viewer-none {
-		margin: auto;
-		padding: var(--space-8);
-		color: #fff;
-	}
 	.head-row {
 		display: flex;
 		align-items: center;
@@ -539,6 +532,10 @@
 	.menu-item:hover {
 		background: var(--surface-2);
 	}
+	.menu-item--danger,
+	.menu-item--danger :global(svg) {
+		color: var(--red);
+	}
 	.modal-actions {
 		display: flex;
 		justify-content: flex-end;
@@ -557,10 +554,18 @@
 		gap: var(--space-2);
 	}
 	.file-row {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
 		padding: var(--space-3);
+	}
+	.file-row.menu-open {
+		z-index: 30; /* later flex siblings paint above earlier ones */
+	}
+	.file-actions {
+		position: relative;
+		flex-shrink: 0;
 	}
 	.file-main {
 		display: flex;

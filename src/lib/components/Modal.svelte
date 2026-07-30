@@ -56,7 +56,7 @@
 
 {#if open}
 	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-	<div class="scrim" onclick={close} onkeydown={onkey}>
+	<div class="scrim" class:scrim--full={fullscreen} onclick={close} onkeydown={onkey}>
 		<div
 			class="dialog"
 			class:dialog--full={fullscreen}
@@ -106,9 +106,17 @@
 		box-shadow: var(--shadow-lg);
 		animation: pop 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
 	}
+	/* the fixed scrim is the viewport lock — no vh/dvh anywhere, so the viewer
+	   never hides behind mobile browser chrome nor jumps as the url bar collapses */
+	.scrim--full {
+		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+			env(safe-area-inset-left);
+	}
 	.dialog--full {
-		width: min(1100px, 100%);
-		max-height: 92vh;
+		width: 100%;
+		height: 100%;
+		max-height: none;
+		border-radius: 0;
 	}
 	.head {
 		display: flex;
@@ -137,12 +145,14 @@
 		overflow: auto;
 	}
 	.body--full {
+		flex: 1;
+		min-height: 0;
 		padding: 0;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		background: #000;
-		border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+		border-radius: 0;
 	}
 	@keyframes fade-scrim {
 		from {
