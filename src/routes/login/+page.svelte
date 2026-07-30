@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { login } from '$lib/auth.js';
+	import { Files } from 'lucide-svelte';
 
 	let email = $state('');
 	let password = $state('');
@@ -24,11 +25,13 @@
 </script>
 
 <div class="auth-wrap fade-in">
-	<h1><span class="emo">📝</span> ShareNote</h1>
-	<p class="muted" style="margin: 8px 0 26px;">Notes you write together.</p>
+	<div class="brand-mark"><Files size={26} /></div>
+	<h1>ShareDoc</h1>
+	<p class="muted" style="margin: 8px 0 26px;">Notes and documents you share together.</p>
 	<form class="card auth-card" onsubmit={submit}>
 		<label class="label" for="email">Email</label>
-		<input id="email" class="input" type="email" bind:value={email} autocomplete="email" required />
+		<!-- svelte-ignore a11y_autofocus -->
+		<input id="email" class="input" type="email" bind:value={email} autocomplete="email" autofocus required />
 		<label class="label" for="password">Password</label>
 		<input id="password" class="input" type="password" bind:value={password} autocomplete="current-password" required />
 		{#if error}<p class="error-text">{error}</p>{/if}
@@ -43,15 +46,28 @@
 
 <style>
 	.auth-wrap {
-		max-width: 400px;
+		max-width: 380px;
 		margin: 12vh auto 0;
 		text-align: center;
 	}
+	.brand-mark {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 52px;
+		height: 52px;
+		margin-bottom: var(--space-4);
+		border-radius: var(--radius);
+		background: var(--accent-soft);
+		color: var(--accent);
+		border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+	}
 	.auth-card {
-		padding: 26px;
+		padding: var(--space-6);
 		text-align: left;
 	}
 	.auth-card a {
 		color: var(--accent);
+		font-weight: 550;
 	}
 </style>

@@ -1,5 +1,4 @@
 <script>
-	import '@fontsource-variable/fraunces';
 	import '@fontsource-variable/inter';
 	import '../app.css';
 	import { onMount } from 'svelte';
@@ -7,13 +6,30 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { user, checkSession, logout } from '$lib/auth.js';
-	import { applyTheme, THEMES, coerceTheme } from '$lib/themes.js';
+	import { applyTheme, THEMES, preferredTheme } from '$lib/themes.js';
 	import { pushSupported, registerSW, currentSubscription, subscribePush, unsubscribePush } from '$lib/push.js';
+	import Toast from '$lib/components/Toast.svelte';
+	import { toast } from '$lib/toast.js';
+	import {
+		Files,
+		FileText,
+		FolderOpen,
+		Users,
+		Shield,
+		Bell,
+		User,
+		Maximize2,
+		Minimize2,
+		Palette,
+		LogOut,
+		Check
+	} from 'lucide-svelte';
 
 	let { children } = $props();
 
 	let pushState = $state('unknown'); // unknown | off | on | unsupported
 	let themeOpen = $state(false);
+	let curTheme = $state('ink');
 	let wide = $state(false); // stretch layout to full width on big screens
 
 	function toggleWide() {
@@ -43,7 +59,8 @@
 	});
 
 	onMount(async () => {
-		applyTheme(coerceTheme(localStorage.getItem('theme')));
+		curTheme = preferredTheme();
+		applyTheme(curTheme);
 		wide = localStorage.getItem('wide') === '1';
 		await checkSession();
 		registerSW();
@@ -68,8 +85,9 @@
 		try {
 			await subscribePush();
 			pushState = 'on';
+			toast.success('Notifications enabled');
 		} catch (e) {
-			alert(e.message);
+			toast.error(e.message || 'Could not enable notifications');
 		}
 	}
 
@@ -85,7 +103,7 @@
 
 <div class="app" class:app--wide={wide}>
 	{#if $user === undefined}
-		<p class="muted" style="text-align:center; margin-top:40vh">Loading…</p>
+		<div class="boot"><span class="spinner"></span></div>
 	{:else if $user === null}
 		{@render children()}
 	{:else if $user.status !== 'approved'}
@@ -103,25 +121,33 @@
 		</div>
 	{:else}
 		<header class="topbar">
-			<a href="{base}/" class="brand"><span class="emo">📁</span> ShareDoc</a>
+			<a href="{base}/" class="brand"><Files size={20} /> ShareDoc</a>
 			<nav>
-				<a href="{base}/" class:active={$page.url.pathname === `${base}/`}>Notes</a>
-				<a href="{base}/docs" class:active={$page.url.pathname.startsWith(`${base}/docs`)}>Docs</a>
-				<a href="{base}/groups" class:active={$page.url.pathname.startsWith(`${base}/groups`)}>Groups</a>
+				<a href="{base}/" class:active={$page.url.pathname === `${base}/`}>
+					<FileText size={16} /><span>Notes</span>
+				</a>
+				<a href="{base}/docs" class:active={$page.url.pathname.startsWith(`${base}/docs`)}>
+					<FolderOpen size={16} /><span>Docs</span>
+				</a>
+				<a href="{base}/groups" class:active={$page.url.pathname.startsWith(`${base}/groups`)}>
+					<Users size={16} /><span>Groups</span>
+				</a>
 				{#if $user.role === 'admin'}
-					<a href="{base}/admin" class:active={$page.url.pathname.startsWith(`${base}/admin`)}>Admin</a>
+					<a href="{base}/admin" class:active={$page.url.pathname.startsWith(`${base}/admin`)}>
+						<Shield size={16} /><span>Admin</span>
+					</a>
 				{/if}
 			</nav>
 			<div class="topbar-actions">
 				{#if pushState === 'off'}
-					<button class="btn btn--sm" title="Enable notifications" onclick={enablePush}>🔔</button>
+					<button class="icon-btn" title="Enable notifications" aria-label="Enable notifications" onclick={enablePush}><Bell size={18} /></button>
 				{/if}
-				<a href="{base}/account" class="btn btn--sm" title="Account">👤</a>
-				<button class="btn btn--sm wide-btn" title={wide ? 'Normal width' : 'Full width'} onclick={toggleWide}>
-					{wide ? '🡘' : '⛶'}
+				<a href="{base}/account" class="icon-btn" title="Account" aria-label="Account"><User size={18} /></a>
+				<button class="icon-btn wide-btn" title={wide ? 'Normal width' : 'Full width'} aria-label="Toggle width" onclick={toggleWide}>
+					{#if wide}<Minimize2 size={18} />{:else}<Maximize2 size={18} />{/if}
 				</button>
-				<button class="btn btn--sm" title="Theme" onclick={() => (themeOpen = !themeOpen)}>🎨</button>
-				<button class="btn btn--sm" title="Log out" onclick={doLogout}>↪</button>
+				<button class="icon-btn" class:on={themeOpen} title="Theme" aria-label="Theme" onclick={() => (themeOpen = !themeOpen)}><Palette size={18} /></button>
+				<button class="icon-btn" title="Log out" aria-label="Log out" onclick={doLogout}><LogOut size={18} /></button>
 			</div>
 		</header>
 		{#if themeOpen}
@@ -129,11 +155,15 @@
 				{#each THEMES as t (t.id)}
 					<button
 						class="theme-swatch"
-						onclick={() => { applyTheme(t.id); themeOpen = false; }}
+						class:selected={t.id === curTheme}
+						onclick={() => { applyTheme(t.id); curTheme = t.id; themeOpen = false; }}
 						title={t.name}
 					>
-						{#each t.swatch as c (c)}<span style="background:{c}"></span>{/each}
+						<span class="swatches">
+							{#each t.swatch as c (c)}<span style="background:{c}"></span>{/each}
+						</span>
 						{t.name}
+						{#if t.id === curTheme}<Check size={14} />{/if}
 					</button>
 				{/each}
 			</div>
@@ -141,6 +171,7 @@
 		{@render children()}
 	{/if}
 </div>
+<Toast />
 
 <style>
 	/* pointless on phones — layout is already full width there */
@@ -149,70 +180,152 @@
 			display: none;
 		}
 	}
+	.boot {
+		display: flex;
+		justify-content: center;
+		margin-top: 42vh;
+	}
+	.spinner {
+		width: 26px;
+		height: 26px;
+		border-radius: 50%;
+		border: 2px solid var(--border);
+		border-top-color: var(--accent);
+		animation: spin 0.7s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
 	.topbar {
 		display: flex;
 		align-items: center;
-		gap: 18px;
-		margin-bottom: 8px;
+		gap: var(--space-4);
+		padding-bottom: var(--space-4);
+		margin-bottom: var(--space-5);
+		border-bottom: 1px solid var(--border);
 	}
 	.brand {
 		font-family: var(--font-display);
-		font-weight: 700;
-		font-size: 1.25rem;
+		font-weight: 650;
+		font-size: 1.1rem;
+		letter-spacing: -0.02em;
 		color: var(--text);
 		text-decoration: none;
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-2);
+	}
+	.brand :global(svg) {
+		color: var(--accent);
 	}
 	nav {
 		display: flex;
-		gap: 4px;
+		gap: 2px;
 		flex: 1;
 	}
 	nav a {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
 		color: var(--text-dim);
 		text-decoration: none;
-		font-size: 0.92rem;
-		font-weight: 600;
-		padding: 6px 12px;
-		border-radius: 999px;
+		font-size: var(--fs-sm);
+		font-weight: 550;
+		padding: 7px 12px;
+		border-radius: var(--radius-sm);
+		transition: color 0.12s ease, background 0.12s ease;
+	}
+	nav a:hover {
+		color: var(--text);
+		background: var(--surface-2);
 	}
 	nav a.active {
 		color: var(--text);
 		background: var(--surface-2);
+		box-shadow: inset 0 0 0 1px var(--border);
 	}
 	.topbar-actions {
 		display: flex;
-		gap: 6px;
+		gap: 2px;
+	}
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 38px;
+		height: 38px;
+		border-radius: var(--radius-sm);
+		color: var(--text-dim);
+		border: 1px solid transparent;
+		background: transparent;
+		transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+	}
+	.icon-btn:hover {
+		color: var(--text);
+		background: var(--surface-2);
+		border-color: var(--border);
+	}
+	.icon-btn.on {
+		color: var(--accent);
+		background: var(--accent-soft);
 	}
 	.theme-picker {
-		padding: 12px;
-		margin-bottom: 14px;
+		padding: var(--space-2);
+		margin-bottom: var(--space-5);
 		display: flex;
-		gap: 10px;
+		gap: var(--space-2);
 		flex-wrap: wrap;
 	}
 	.theme-swatch {
 		display: flex;
 		align-items: center;
-		gap: 4px;
-		font-size: 0.84rem;
-		font-weight: 600;
+		gap: var(--space-2);
+		font-size: var(--fs-sm);
+		font-weight: 550;
 		color: var(--text-dim);
-		padding: 6px 10px;
+		padding: 7px 12px;
 		border-radius: var(--radius-sm);
 		border: 1px solid var(--border);
+		transition: border-color 0.12s ease, color 0.12s ease;
 	}
-	.theme-swatch span {
-		width: 14px;
-		height: 14px;
+	.theme-swatch:hover {
+		border-color: var(--border-strong);
+		color: var(--text);
+	}
+	.theme-swatch.selected {
+		color: var(--text);
+		border-color: var(--accent);
+	}
+	.theme-swatch.selected :global(svg) {
+		color: var(--accent);
+	}
+	.swatches {
+		display: inline-flex;
+	}
+	.swatches span {
+		width: 13px;
+		height: 13px;
 		border-radius: 50%;
 		display: inline-block;
+		border: 1px solid rgba(128, 128, 128, 0.3);
+	}
+	.swatches span + span {
+		margin-left: -4px;
+	}
+	@media (max-width: 620px) {
+		nav a span {
+			display: none;
+		}
+		nav a {
+			padding: 8px 10px;
+		}
 	}
 	@media (max-width: 560px) {
 		.topbar {
 			flex-wrap: wrap;
+			gap: var(--space-3);
 		}
 		nav {
 			order: 3;

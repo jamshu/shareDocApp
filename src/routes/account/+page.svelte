@@ -3,6 +3,7 @@
 	import { user } from '$lib/auth.js';
 	import { unsubscribePush } from '$lib/push.js';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
+	import { TriangleAlert, User, Building2, Mail } from 'lucide-svelte';
 
 	let password = $state('');
 	let busy = $state(false);
@@ -40,12 +41,18 @@
 </div>
 
 <div class="card info-card">
-	<strong>{$user?.name}</strong>
-	<div class="muted">{$user?.email}</div>
-	<div class="muted">{$user?.companyName} — {$user?.role === 'admin' ? 'admin' : 'member'}</div>
+	<div class="avatar">{($user?.name || '?').trim().charAt(0).toUpperCase()}</div>
+	<div class="info-lines">
+		<strong>{$user?.name}</strong>
+		<div class="info-line"><Mail size={14} /> {$user?.email}</div>
+		<div class="info-line">
+			<Building2 size={14} /> {$user?.companyName}
+			<span class="chip chip--accent">{$user?.role === 'admin' ? 'admin' : 'member'}</span>
+		</div>
+	</div>
 </div>
 
-<div class="section-title"><span class="emo">⚠️</span> Danger zone</div>
+<div class="section-title"><TriangleAlert size={15} /> Danger zone</div>
 <div class="card danger-card">
 	<p class="muted" style="margin:0 0 12px;">
 		Deleting your account is permanent. Your notes, the comments on them, your comments on other
@@ -70,18 +77,54 @@
 
 <style>
 	.head-row {
-		margin: 18px 0 4px;
+		margin: var(--space-2) 0 var(--space-4);
 	}
-	.info-card,
-	.danger-card {
-		padding: 16px 18px;
+	.info-card {
+		display: flex;
+		align-items: center;
+		gap: var(--space-4);
+		padding: var(--space-4);
+	}
+	.avatar {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 48px;
+		height: 48px;
+		flex-shrink: 0;
+		border-radius: 50%;
+		background: var(--accent);
+		color: var(--on-accent);
+		font-size: 1.2rem;
+		font-weight: 650;
+	}
+	.info-lines {
+		display: flex;
+		flex-direction: column;
+		gap: 5px;
+		min-width: 0;
+	}
+	.info-lines strong {
+		font-size: var(--fs-lg);
+	}
+	.info-line {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		font-size: var(--fs-sm);
+		color: var(--text-dim);
+	}
+	.info-line :global(svg) {
+		color: var(--text-faint);
 	}
 	.danger-card {
-		border-color: color-mix(in srgb, var(--red) 45%, transparent);
+		padding: var(--space-4);
+		border-color: color-mix(in srgb, var(--red) 40%, var(--border));
+		background: color-mix(in srgb, var(--red) 4%, var(--surface));
 	}
 	.row {
 		display: flex;
 		justify-content: flex-end;
-		margin-top: 12px;
+		margin-top: var(--space-3);
 	}
 </style>

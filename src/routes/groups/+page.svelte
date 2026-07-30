@@ -3,6 +3,10 @@
 	import { base } from '$app/paths';
 	import { user } from '$lib/auth.js';
 	import { odooClient } from '$lib/odoo.js';
+	import { toast } from '$lib/toast.js';
+	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
+	import { Plus, Users, Check } from 'lucide-svelte';
 
 	let groups = $state([]);
 	let orgUsers = $state([]);
@@ -29,14 +33,18 @@
 
 	async function createGroup(e) {
 		e.preventDefault();
-		if (!newName.trim()) return;
+		if (!newName.trim()) {
+			toast.error('Enter a group name');
+			return;
+		}
 		error = '';
 		try {
 			await odooClient.createRecord({ x_name: newName.trim() }, 'groups');
 			newName = '';
 			await load();
+			toast.success('Group created');
 		} catch (err) {
-			error = err.message;
+			toast.error(err.message);
 		}
 	}
 
@@ -50,17 +58,17 @@
 			group.x_studio_member_ids = next;
 			groups = groups;
 		} catch (err) {
-			error = err.message;
+			toast.error(err.message);
 		}
 	}
 
 	async function removeGroup(id) {
-		if (!confirm('Delete this group? Notes shared via it will no longer reach its members.')) return;
 		try {
 			await odooClient.deleteRecord(id, 'groups');
 			await load();
+			toast.success('Group deleted');
 		} catch (err) {
-			error = err.message;
+			toast.error(err.message);
 		}
 	}
 </script>
@@ -72,30 +80,34 @@
 
 <form class="card new-group" onsubmit={createGroup}>
 	<input class="input" placeholder="New group name…" bind:value={newName} />
-	<button class="btn btn--primary">Create</button>
+	<button class="btn btn--primary"><Plus size={16} /> Create</button>
 </form>
 
 {#if error}<p class="error-text">{error}</p>{/if}
 
 {#if loading}
-	<p class="muted">Loading…</p>
+	{#each Array(2) as _}
+		<div class="card group-card"><Skeleton h="1.05rem" w="40%" /><div style="margin-top:14px"><Skeleton h="0.8rem" w="25%" /></div></div>
+	{/each}
 {:else}
 	{#each groups as g, i (g.id)}
+		{@const count = (g.x_studio_member_ids || []).length}
 		<div class="card group-card fade-in" style="--fade-delay: {i * 0.04}s">
 			<div class="group-head">
 				<h3>{g.x_name}</h3>
-				<span class="muted">{(g.x_studio_member_ids || []).length} member(s)</span>
+				<span class="chip"><Users size={13} /> {count}</span>
 				{#if g.create_uid?.[0] === $user?.uid}
-					<button class="btn btn--sm btn--danger" onclick={() => removeGroup(g.id)}>Delete</button>
+					<ConfirmButton label="Delete" confirmLabel="Sure?" onconfirm={() => removeGroup(g.id)} />
 				{/if}
 			</div>
 			{#if g.create_uid?.[0] === $user?.uid}
 				<div class="picker">
 					{#each orgUsers as u (u.id)}
+						{@const on = (g.x_studio_member_ids || []).includes(u.id)}
 						<button
-							class="chip {(g.x_studio_member_ids || []).includes(u.id) ? 'chip--accent' : ''}"
+							class="chip {on ? 'chip--accent' : ''}"
 							onclick={() => toggleMember(g, u.id)}
-						>{u.name}</button>
+						>{#if on}<Check size={13} />{/if}{u.name}</button>
 					{/each}
 					{#if orgUsers.length === 0}
 						<p class="muted">No other members in your organization yet.</p>
@@ -110,31 +122,35 @@
 
 <style>
 	.head-row {
-		margin: 18px 0 4px;
+		margin: var(--space-2) 0 var(--space-2);
 	}
 	.new-group {
 		display: flex;
-		gap: 10px;
-		padding: 14px;
-		margin: 16px 0;
+		gap: var(--space-2);
+		padding: var(--space-3);
+		margin: var(--space-4) 0;
 	}
 	.group-card {
-		padding: 16px 18px;
-		margin-bottom: 12px;
+		padding: var(--space-4);
+		margin-bottom: var(--space-3);
 	}
 	.group-head {
 		display: flex;
 		align-items: center;
-		gap: 12px;
-		margin-bottom: 10px;
+		gap: var(--space-3);
+		margin-bottom: var(--space-3);
 	}
 	.group-head h3 {
 		flex: 1;
-		font-size: 1.05rem;
+		font-size: var(--fs-lg);
+		font-weight: 600;
 	}
 	.picker {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 8px;
+		gap: var(--space-2);
+	}
+	.picker .chip {
+		cursor: pointer;
 	}
 </style>

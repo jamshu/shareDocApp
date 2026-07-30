@@ -4,11 +4,15 @@
 	import { base } from '$app/paths';
 	import { user } from '$lib/auth.js';
 	import { odooClient } from '$lib/odoo.js';
+	import { toast } from '$lib/toast.js';
+	import Skeleton from '$lib/components/Skeleton.svelte';
+	import { Search, X, Plus, PenLine, Users } from 'lucide-svelte';
 
 	let notes = $state([]);
 	let loading = $state(true);
 	let error = $state('');
 	let query = $state('');
+	let sort = $state('recent'); // recent | name
 
 	const FIELDS = ['x_name', 'x_studio_date', 'x_studio_permission', 'create_uid', 'write_date'];
 
@@ -33,8 +37,9 @@
 		try {
 			// record rules already limit results to own + shared-with-me notes
 			const q = query.trim();
+			const order = sort === 'name' ? 'x_name asc' : 'write_date desc';
 			const results = await odooClient.searchRecords(q ? searchDomain(q) : [], FIELDS, 'notes', {
-				order: 'write_date desc'
+				order
 			});
 			if (seq !== loadSeq) return;
 			notes = results;
@@ -52,6 +57,11 @@
 		searchTimer = setTimeout(load, 300);
 	}
 
+	function clearSearch() {
+		query = '';
+		load();
+	}
+
 	async function newNote() {
 		try {
 			const id = await odooClient.createRecord({
@@ -61,7 +71,7 @@
 			});
 			goto(`${base}/note/${id}`);
 		} catch (e) {
-			error = e.message;
+			toast.error(e.message || 'Could not create note');
 		}
 	}
 
@@ -74,7 +84,7 @@
 			<a class="card card--interactive note-card fade-in" style="--fade-delay: {i * 0.04}s" href="{base}/note/{n.id}">
 				<h3>{n.x_name}</h3>
 				<div class="note-meta">
-					<span class="muted">{fmtDate(n.x_studio_date)}</span>
+					<span class="mono">{fmtDate(n.x_studio_date)}</span>
 					{#if n.create_uid?.[0] !== $user?.uid}
 						<span class="chip">{n.create_uid?.[1]}</span>
 					{/if}
@@ -87,28 +97,52 @@
 	</div>
 {/snippet}
 
+{#snippet skeletonGrid()}
+	<div class="note-grid">
+		{#each Array(6) as _}
+			<div class="card note-card">
+				<Skeleton h="1.05rem" w="70%" />
+				<div style="margin-top:14px"><Skeleton h="0.8rem" w="45%" /></div>
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
 <div class="head-row">
 	<h1>Notes</h1>
-	<button class="btn btn--primary" onclick={newNote}>+ New note</button>
+	<button class="btn btn--primary" onclick={newNote}><Plus size={16} /> New note</button>
 </div>
 
-<input
-	class="input search-input"
-	type="search"
-	placeholder="🔍 Search notes…"
-	bind:value={query}
-	oninput={onSearchInput}
-/>
+<div class="toolbar">
+	<div class="search">
+		<Search size={17} class="search-ic" />
+		<input
+			class="input"
+			type="search"
+			placeholder="Search notes…"
+			bind:value={query}
+			oninput={onSearchInput}
+		/>
+		{#if query}
+			<button class="clear" aria-label="Clear search" onclick={clearSearch}><X size={15} /></button>
+		{/if}
+	</div>
+	<select class="select sort" bind:value={sort} onchange={load} aria-label="Sort">
+		<option value="recent">Recent</option>
+		<option value="name">Name</option>
+	</select>
+</div>
 
 {#if error}<p class="error-text">{error}</p>{/if}
 
 {#if loading}
-	<p class="muted">Loading…</p>
+	<div class="section-title"><PenLine size={15} /> My notes</div>
+	{@render skeletonGrid()}
 {:else}
-	<div class="section-title"><span class="emo">✍️</span> My notes</div>
+	<div class="section-title"><PenLine size={15} /> My notes</div>
 	{#if mine.length}{@render noteList(mine)}{:else}<p class="muted">{query.trim() ? 'No matches.' : 'Nothing yet — create your first note.'}</p>{/if}
 
-	<div class="section-title"><span class="emo">🤝</span> Shared with me</div>
+	<div class="section-title"><Users size={15} /> Shared with me</div>
 	{#if shared.length}{@render noteList(shared)}{:else}<p class="muted">{query.trim() ? 'No matches.' : 'No shared notes yet.'}</p>{/if}
 {/if}
 
@@ -117,26 +151,62 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin: 18px 0 4px;
+		margin: var(--space-2) 0 var(--space-4);
 	}
-	.search-input {
-		width: 100%;
-		margin: 4px 0 10px;
+	.toolbar {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+	}
+	.search {
+		position: relative;
+		flex: 1;
+	}
+	.search :global(.search-ic) {
+		position: absolute;
+		left: 12px;
+		top: 50%;
+		transform: translateY(-50%);
+		color: var(--text-faint);
+		pointer-events: none;
+	}
+	.search .input {
+		padding-left: 38px;
+		padding-right: 34px;
+	}
+	.clear {
+		position: absolute;
+		right: 8px;
+		top: 50%;
+		transform: translateY(-50%);
+		display: inline-flex;
+		padding: 4px;
+		border-radius: 6px;
+		color: var(--text-faint);
+	}
+	.clear:hover {
+		background: var(--surface-2);
+		color: var(--text);
+	}
+	.sort {
+		width: auto;
+		flex-shrink: 0;
 	}
 	.note-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-		gap: 14px;
+		gap: var(--space-3);
 	}
 	.note-card {
 		display: block;
-		padding: 18px;
+		padding: var(--space-4);
 		text-decoration: none;
 		color: var(--text);
 	}
 	.note-card h3 {
-		font-size: 1.05rem;
-		margin-bottom: 10px;
+		font-size: var(--fs-lg);
+		font-weight: 600;
+		margin-bottom: var(--space-3);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -144,7 +214,9 @@
 	.note-meta {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-2);
 		flex-wrap: wrap;
+		font-size: var(--fs-xs);
+		color: var(--text-dim);
 	}
 </style>

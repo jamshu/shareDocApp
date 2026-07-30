@@ -14,6 +14,8 @@ export default defineConfig({
 			// auto-injected registration never runs. Register manually in client code:
 			//   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js')
 			injectRegister: false,
+			// Serve the manifest + SW in dev too, so /manifest.webmanifest isn't a 404.
+			devOptions: { enabled: true, type: 'module' },
 			injectManifest: {
 				globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}']
 			},
@@ -26,8 +28,8 @@ export default defineConfig({
 				scope: '/',
 				display: 'standalone',
 				orientation: 'portrait',
-				background_color: '#0b1120',
-				theme_color: '#0f766e',
+				background_color: '#0a0a0a',
+				theme_color: '#0a0a0a',
 				icons: [
 					{ src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
 					{ src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },

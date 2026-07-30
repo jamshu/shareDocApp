@@ -4,6 +4,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/stores';
 	import { signup } from '$lib/auth.js';
+	import { Files } from 'lucide-svelte';
 
 	let name = $state('');
 	let email = $state('');
@@ -56,7 +57,8 @@
 </script>
 
 <div class="auth-wrap fade-in">
-	<h1><span class="emo">📝</span> ShareNote</h1>
+	<div class="brand-mark"><Files size={26} /></div>
+	<h1>ShareDoc</h1>
 	<p class="muted" style="margin: 8px 0 26px;">Create your account.</p>
 	<form class="card auth-card" onsubmit={submit}>
 		{#if invitedOrg}
@@ -114,17 +116,30 @@
 		margin: 8vh auto 0;
 		text-align: center;
 	}
+	.brand-mark {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 52px;
+		height: 52px;
+		margin-bottom: var(--space-4);
+		border-radius: var(--radius);
+		background: var(--accent-soft);
+		color: var(--accent);
+		border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+	}
 	.auth-card {
-		padding: 26px;
+		padding: var(--space-6);
 		text-align: left;
 	}
 	.auth-card a {
 		color: var(--accent);
+		font-weight: 550;
 	}
 	.mode-row {
 		display: flex;
-		gap: 8px;
-		margin-bottom: 10px;
+		gap: var(--space-2);
+		margin-bottom: var(--space-3);
 	}
 	.mode-row label {
 		flex: 1;
@@ -134,13 +149,18 @@
 		padding: 10px 12px;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
-		font-size: 0.9rem;
-		font-weight: 600;
+		font-size: var(--fs-sm);
+		font-weight: 550;
 		color: var(--text-dim);
 		cursor: pointer;
+		transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+	}
+	.mode-row label:hover {
+		border-color: var(--border-strong);
 	}
 	.mode-row label.selected {
 		border-color: var(--accent);
+		background: var(--accent-soft);
 		color: var(--text);
 	}
 </style>
