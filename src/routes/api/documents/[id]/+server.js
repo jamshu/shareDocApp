@@ -42,6 +42,33 @@ export async function GET({ params, cookies, url }) {
 	}
 }
 
+// Rename and/or change sharing. Same model for files and folders.
+//   PATCH { name?, access_internal? }  -> { ok }
+export async function PATCH({ params, request, cookies }) {
+	try {
+		assertConfigured();
+		const { sid, ctx } = await requireDocsUser(cookies);
+		const { name, access_internal } = await request.json();
+		const vals = {};
+		if (name !== undefined) {
+			if (!name?.trim()) return json({ ok: false, error: 'name required' }, { status: 400 });
+			vals.name = name.trim();
+		}
+		if (access_internal !== undefined) {
+			if (!['none', 'edit'].includes(access_internal)) {
+				return json({ ok: false, error: 'invalid access_internal' }, { status: 400 });
+			}
+			vals.access_internal = access_internal;
+		}
+		if (!Object.keys(vals).length) return json({ ok: false, error: 'nothing to update' }, { status: 400 });
+		await userCall(cookies, sid, ctx, 'documents.document', 'write', [[Number(params.id)], vals]);
+		return json({ ok: true });
+	} catch (e) {
+		if (e?.status === 401) clearSessionCookie(cookies);
+		return json({ ok: false, error: e?.message || 'Failed' }, { status: e?.status || 500 });
+	}
+}
+
 export async function DELETE({ params, cookies }) {
 	try {
 		assertConfigured();

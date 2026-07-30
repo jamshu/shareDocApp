@@ -23,12 +23,22 @@ export async function GET({ cookies }) {
 	try {
 		assertConfigured();
 		const { sid, ctx } = await requireDocsUser(cookies);
+		// Odoo record rules on this instance don't hide access_internal='none' from
+		// other internal users, so enforce privacy here: a folder is visible if it's
+		// shared (access_internal != 'none') OR I created it.
 		const rows = await userCall(cookies, sid, ctx, 'documents.document', 'search_read', [
-			[['type', '=', 'folder'], ['active', '=', true]]
-		], { fields: ['name', 'folder_id'], order: 'name' });
+			[['type', '=', 'folder'], ['active', '=', true],
+				'|', ['access_internal', '!=', 'none'], ['create_uid', '=', ctx.uid]]
+		], { fields: ['name', 'folder_id', 'create_uid', 'access_internal'], order: 'name' });
 		return json({
 			ok: true,
-			folders: rows.map((r) => ({ id: r.id, name: r.name, parentId: r.folder_id?.[0] ?? null }))
+			folders: rows.map((r) => ({
+				id: r.id,
+				name: r.name,
+				parentId: r.folder_id?.[0] ?? null,
+				mine: r.create_uid?.[0] === ctx.uid,
+				shared: r.access_internal !== 'none'
+			}))
 		});
 	} catch (e) {
 		if (e?.status === 401) clearSessionCookie(cookies);
@@ -46,7 +56,7 @@ export async function POST({ request, cookies }) {
 			name: name.trim(),
 			type: 'folder',
 			folder_id: parentId ? Number(parentId) : false,
-			access_internal: 'edit' // family vault: every internal user can see and add
+			access_internal: 'none' // private My Drive by default; owner shares explicitly
 		}]);
 		return json({ ok: true, id });
 	} catch (e) {

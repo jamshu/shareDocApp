@@ -11,8 +11,14 @@
 	let uploading = $state(false);
 	let error = $state('');
 	let viewerFile = $state(null);
+	let menuId = $state(null); // folder id whose kebab menu is open
+	let renaming = $state(null); // item ({id,name}) being renamed
+	let renameValue = $state('');
+	let renameSaving = $state(false);
 
 	let children = $derived(folders.filter((f) => f.parentId === currentId));
+	let myFolders = $derived(children.filter((f) => !f.shared)); // private = My Drive
+	let sharedFolders = $derived(children.filter((f) => f.shared)); // company-wide
 	let crumbs = $derived.by(() => {
 		const byId = new Map(folders.map((f) => [f.id, f]));
 		const trail = [];
@@ -20,7 +26,10 @@
 		return trail;
 	});
 
-	onMount(loadFolders);
+	onMount(async () => {
+		await loadFolders();
+		await open(null); // load My Drive root files
+	});
 
 	async function api(path, opts) {
 		const res = await fetch(path, opts);
@@ -44,11 +53,10 @@
 	async function open(folderId) {
 		currentId = folderId;
 		files = [];
-		if (!folderId) return;
 		filesLoading = true;
 		error = '';
 		try {
-			files = (await api(`/api/documents?folderId=${folderId}`)).files;
+			files = (await api(`/api/documents?folderId=${folderId ?? 'root'}`)).files;
 		} catch (e) {
 			error = e.message;
 		} finally {
@@ -111,6 +119,49 @@
 		}
 	}
 
+	function rename(item) {
+		renaming = item;
+		renameValue = item.name;
+	}
+
+	async function submitRename() {
+		const name = renameValue.trim();
+		if (!name || !renaming) return;
+		if (name === renaming.name) {
+			renaming = null;
+			return;
+		}
+		renameSaving = true;
+		error = '';
+		try {
+			await api(`/api/documents/${renaming.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name })
+			});
+			renaming.name = name; // $state array items are reactive
+			renaming = null;
+		} catch (e) {
+			error = e.message;
+		} finally {
+			renameSaving = false;
+		}
+	}
+
+	async function toggleShare(f) {
+		const next = f.shared ? 'none' : 'edit';
+		try {
+			await api(`/api/documents/${f.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ access_internal: next })
+			});
+			f.shared = !f.shared;
+		} catch (e) {
+			error = e.message;
+		}
+	}
+
 	async function download(f) {
 		try {
 			await downloadFile(`/api/documents/${f.id}?download`, f.name);
@@ -158,50 +209,127 @@
 
 {#if error}<p class="error-text">{error}</p>{/if}
 
+{#snippet folderCard(f, i)}
+	<div class="card folder-card fade-in" class:menu-open={menuId === f.id} style="--fade-delay: {i * 0.03}s">
+		<button class="folder-main" onclick={() => open(f.id)}>
+			<span class="emo">📁</span>
+			<span class="folder-name">{f.name}</span>
+		</button>
+		<div class="folder-actions">
+			<button
+				class="btn btn--sm kebab"
+				title="More"
+				aria-label="More actions"
+				onclick={(e) => {
+					e.stopPropagation();
+					menuId = menuId === f.id ? null : f.id;
+				}}>⋮</button>
+			{#if menuId === f.id}
+				<div class="menu" role="menu">
+					<button class="menu-item" onclick={(e) => { e.stopPropagation(); menuId = null; rename(f); }}>✏ Rename</button>
+					{#if f.mine}
+						<button class="menu-item" onclick={(e) => { e.stopPropagation(); menuId = null; toggleShare(f); }}>
+							{f.shared ? '🔓 Make private' : '🔒 Share'}
+						</button>
+					{/if}
+				</div>
+			{/if}
+		</div>
+	</div>
+{/snippet}
+
+{#snippet fileRow(f)}
+	<div class="card file-row fade-in">
+		<button class="file-main" onclick={() => (viewerFile = f)}>
+			<span class="emo">{icon(f.mimetype)}</span>
+			<span class="file-info">
+				<span class="file-name">{f.name}</span>
+				<span class="muted file-meta">{fmtSize(f.size)} · {fmtDate(f.date)}{f.owner ? ` · ${f.owner}` : ''}</span>
+			</span>
+		</button>
+		<button class="btn btn--sm" title="Rename" onclick={() => rename(f)}>✏</button>
+		<button class="btn btn--sm" title="Download" onclick={() => download(f)}>⬇</button>
+		<ConfirmButton label="🗑" confirmLabel="Sure?" onconfirm={() => archive(f.id)} />
+	</div>
+{/snippet}
+
 {#if loading}
 	<p class="muted">Loading…</p>
-{:else}
+{:else if currentId}
+	<!-- Inside a folder: all children folders + all files, regardless of owner -->
 	{#if children.length}
 		<div class="folder-grid">
-			{#each children as f, i (f.id)}
-				<button class="card card--interactive folder-card fade-in" style="--fade-delay: {i * 0.03}s" onclick={() => open(f.id)}>
-					<span class="emo">📁</span>
-					<span class="folder-name">{f.name}</span>
-				</button>
-			{/each}
+			{#each children as f, i (f.id)}{@render folderCard(f, i)}{/each}
 		</div>
 	{/if}
-
-	{#if currentId}
-		{#if filesLoading}
-			<p class="muted">Loading files…</p>
-		{:else if files.length}
-			<div class="file-list">
-				{#each files as f (f.id)}
-					<div class="card file-row fade-in">
-						<button class="file-main" onclick={() => (viewerFile = f)}>
-							<span class="emo">{icon(f.mimetype)}</span>
-							<span class="file-info">
-								<span class="file-name">{f.name}</span>
-								<span class="muted file-meta">{fmtSize(f.size)} · {fmtDate(f.date)}{f.owner ? ` · ${f.owner}` : ''}</span>
-							</span>
-						</button>
-						<button class="btn btn--sm" title="Download" onclick={() => download(f)}>⬇</button>
-						<ConfirmButton label="🗑" confirmLabel="Sure?" onconfirm={() => archive(f.id)} />
-					</div>
-				{/each}
-			</div>
-		{:else if !children.length}
-			<p class="muted">Empty folder — upload something.</p>
-		{:else}
-			<p class="muted">No files here.</p>
-		{/if}
+	{#if filesLoading}
+		<p class="muted">Loading files…</p>
+	{:else if files.length}
+		<div class="file-list">
+			{#each files as f (f.id)}{@render fileRow(f)}{/each}
+		</div>
 	{:else if !children.length}
-		<p class="muted">No folders yet — create one.</p>
+		<p class="muted">Empty folder — upload something.</p>
+	{/if}
+{:else}
+	<!-- Root: My Drive (mine, private by default) + Shared with me -->
+	<h2 class="section-title">My Drive</h2>
+	{#if myFolders.length}
+		<div class="folder-grid">
+			{#each myFolders as f, i (f.id)}{@render folderCard(f, i)}{/each}
+		</div>
+	{/if}
+	{#if filesLoading}
+		<p class="muted">Loading files…</p>
+	{:else if files.length}
+		<div class="file-list">
+			{#each files as f (f.id)}{@render fileRow(f)}{/each}
+		</div>
+	{/if}
+	{#if !myFolders.length && !files.length}
+		<p class="muted">Empty — create a folder or add files.</p>
+	{/if}
+
+	{#if sharedFolders.length}
+		<h2 class="section-title">Shared with me</h2>
+		<div class="folder-grid">
+			{#each sharedFolders as f, i (f.id)}{@render folderCard(f, i)}{/each}
+		</div>
 	{/if}
 {/if}
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (viewerFile = null)} />
+<svelte:window
+	onkeydown={(e) => e.key === 'Escape' && ((viewerFile = null), (menuId = null), (renaming = null))}
+	onclick={() => (menuId = null)}
+/>
+
+{#if renaming}
+	<div
+		class="modal-scrim"
+		role="dialog"
+		aria-label="Rename"
+		tabindex="-1"
+		onclick={(e) => e.target === e.currentTarget && (renaming = null)}
+	>
+		<div class="modal">
+			<h3 class="modal-title">Rename</h3>
+			<!-- svelte-ignore a11y_autofocus -->
+			<input
+				class="modal-input"
+				value={renameValue}
+				oninput={(e) => (renameValue = e.currentTarget.value)}
+				autofocus
+				onkeydown={(e) => e.key === 'Enter' && submitRename()}
+			/>
+			<div class="modal-actions">
+				<button class="btn" onclick={() => (renaming = null)}>Cancel</button>
+				<button class="btn btn--primary" disabled={renameSaving || !renameValue.trim()} onclick={submitRename}>
+					{renameSaving ? 'Saving…' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 {#if viewerFile}
 	<div
@@ -312,15 +440,118 @@
 		gap: 10px;
 		margin-bottom: 18px;
 	}
+	.section-title {
+		font-size: 0.95rem;
+		font-weight: 700;
+		color: var(--text-dim);
+		margin: 6px 0 10px;
+	}
 	.folder-card {
+		position: relative;
+		display: flex;
+		align-items: center;
+		padding: 12px;
+	}
+	.folder-card.menu-open {
+		z-index: 30; /* lift above sibling grid cards so the menu isn't covered */
+	}
+	.folder-main {
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		padding: 14px;
+		width: 100%;
+		min-width: 0;
+		padding-right: 28px; /* room for the top-right kebab */
 		font-weight: 600;
 		color: var(--text);
+		background: none;
+		border: none;
 		text-align: left;
 		cursor: pointer;
+	}
+	.folder-actions {
+		position: absolute;
+		top: 6px;
+		right: 6px;
+	}
+	.kebab {
+		font-size: 1.1rem;
+		line-height: 1;
+		padding: 2px 8px;
+	}
+	.menu {
+		position: absolute;
+		top: 100%;
+		right: 0;
+		z-index: 20;
+		display: flex;
+		flex-direction: column;
+		min-width: 150px;
+		margin-top: 4px;
+		padding: 4px;
+		background: var(--surface);
+		border: 1px solid var(--surface-2);
+		border-radius: 10px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+	}
+	.menu-item {
+		display: block;
+		width: 100%;
+		padding: 9px 10px;
+		border: none;
+		border-radius: 6px;
+		background: none;
+		color: var(--text);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+	.menu-item:hover {
+		background: var(--surface-2);
+	}
+	.modal-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 60;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 20px;
+		background: rgba(0, 0, 0, 0.6);
+	}
+	.modal {
+		width: 100%;
+		max-width: 360px;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 18px;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 14px;
+		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+	}
+	.modal-title {
+		margin: 0;
+		font-size: 1.05rem;
+	}
+	.modal-input {
+		width: 100%;
+		padding: 11px 12px;
+		font: inherit;
+		color: var(--text);
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+	}
+	.modal-input:focus {
+		outline: none;
+		border-color: var(--accent);
+	}
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
 	}
 	.folder-name {
 		overflow: hidden;

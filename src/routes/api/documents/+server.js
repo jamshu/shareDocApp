@@ -23,10 +23,14 @@ export async function GET({ url, cookies }) {
 	try {
 		assertConfigured();
 		const { sid, ctx } = await requireDocsUser(cookies);
-		const folderId = Number(url.searchParams.get('folderId'));
-		if (!folderId) return json({ ok: false, error: 'folderId required' }, { status: 400 });
+		const raw = url.searchParams.get('folderId');
+		// 'root' (or missing) -> my own files sitting directly in My Drive (no folder).
+		const isRoot = !raw || raw === 'root';
+		const domain = isRoot
+			? [['type', '=', 'binary'], ['folder_id', '=', false], ['create_uid', '=', ctx.uid], ['active', '=', true]]
+			: [['type', '=', 'binary'], ['folder_id', '=', Number(raw)], ['active', '=', true]];
 		const rows = await userCall(cookies, sid, ctx, 'documents.document', 'search_read', [
-			[['type', '=', 'binary'], ['folder_id', '=', folderId], ['active', '=', true]]
+			domain
 		], { fields: ['name', 'mimetype', 'file_size', 'create_date', 'owner_id'], order: 'name' });
 		return json({
 			ok: true,
