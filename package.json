@@ -26,7 +26,7 @@
 		"@fontsource-variable/inter": "^5.2.8",
 		"dompurify": "^3.4.11",
 		"lucide-svelte": "^1.0.1",
-		"marked": "^18.0.5",
+		"marked": "^18.0.7",
 		"pdfjs-dist": "^6.2.108",
 		"turndown": "^7.2.4",
 		"web-push": "^3.6.7"

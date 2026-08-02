@@ -4,6 +4,7 @@
 	import { downloadFile } from '$lib/download.js';
 	import { toast } from '$lib/toast.js';
 	import * as pdfjsLib from 'pdfjs-dist';
+	import { marked } from 'marked';
 
 	pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
@@ -14,6 +15,10 @@
 	// JSON state
 	let jsonContent = $state('');
 	let jsonError = $state('');
+
+	// Markdown state
+	let mdHtml = $state('');
+	let mdError = $state('');
 
 	async function save() {
 		try {
@@ -100,6 +105,40 @@
 			cancelled = true;
 		};
 	});
+
+	// Markdown Fetch and Parse Effect
+	$effect(() => {
+		const isMarkdown =
+			file?.mimetype === 'text/markdown' ||
+			file?.name?.endsWith('.md') ||
+			file?.name?.endsWith('.markdown');
+
+		if (!isMarkdown || !href) return;
+
+		mdError = '';
+		mdHtml = '';
+		let cancelled = false;
+
+		(async () => {
+			try {
+				const res = await fetch(href, { credentials: 'include' });
+				if (!res.ok) throw new Error(`Failed to fetch Markdown: ${res.statusText}`);
+
+				const text = await res.text();
+				if (cancelled) return;
+
+				// Parse Markdown to HTML
+				mdHtml = await marked.parse(text);
+			} catch (e) {
+				console.error('Markdown Preview Error:', e);
+				if (!cancelled) mdError = e.message;
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	});
 </script>
 
 <Modal bind:open={() => !!file, (v) => { if (!v) file = null; }} fullscreen>
@@ -109,7 +148,8 @@
 	{/snippet}
 	<div class="viewport">
 		{#if file?.mimetype === 'application/json' || file?.name?.endsWith('.json')}
-			<div class="json-wrapper">
+			<!-- JSON Preview -->
+			<div class="wide-wrapper">
 				{#if jsonError}
 					<p class="none">Couldn't preview JSON — use Download.</p>
 				{:else if jsonContent}
@@ -120,7 +160,21 @@
 					<p class="none">Loading JSON...</p>
 				{/if}
 			</div>
+		{:else if file?.mimetype === 'text/markdown' || file?.name?.endsWith('.md') || file?.name?.endsWith('.markdown')}
+			<!-- Markdown Preview -->
+			<div class="wide-wrapper">
+				{#if mdError}
+					<p class="none">Couldn't preview Markdown — use Download.</p>
+				{:else if mdHtml}
+					<div class="md-container markdown-body">
+						{@html mdHtml}
+					</div>
+				{:else}
+					<p class="none">Loading Markdown...</p>
+				{/if}
+			</div>
 		{:else}
+			<!-- Phone Frame for Images & PDFs -->
 			<div class="phone">
 				{#if file?.mimetype?.startsWith('image/')}
 					<img class="body" src={href} alt={file.name} />
@@ -196,8 +250,8 @@
 		margin: auto;
 	}
 
-	/* Wide JSON Container Styles */
-	.json-wrapper {
+	/* Shared Wide Container for JSON & Markdown */
+	.wide-wrapper {
 		width: 100%;
 		max-width: 900px;
 		height: 100%;
@@ -206,6 +260,7 @@
 		box-sizing: border-box;
 	}
 
+	/* JSON Viewer Styles */
 	.json-container {
 		flex: 1;
 		width: 100%;
@@ -226,6 +281,86 @@
 		margin: 0;
 		white-space: pre-wrap;
 		word-break: break-word;
+	}
+
+	/* Markdown Preview Styles */
+	.md-container {
+		flex: 1;
+		width: 100%;
+		height: 100%;
+		overflow: auto;
+		padding: var(--space-6, 1.5rem);
+		background: #0d1117;
+		color: #c9d1d9;
+		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+		font-size: 0.95rem;
+		line-height: 1.6;
+		text-align: left;
+		border-radius: 8px;
+		box-sizing: border-box;
+	}
+
+	/* Typography & elements inside Markdown */
+	.md-container :global(h1),
+	.md-container :global(h2),
+	.md-container :global(h3),
+	.md-container :global(h4) {
+		color: #f0f6fc;
+		margin-top: 1.25em;
+		margin-bottom: 0.5em;
+		font-weight: 600;
+		border-bottom: 1px solid #21262d;
+		padding-bottom: 0.3em;
+	}
+
+	.md-container :global(h1) { font-size: 1.6em; }
+	.md-container :global(h2) { font-size: 1.3em; }
+	.md-container :global(h3) { font-size: 1.1em; border-bottom: none; }
+
+	.md-container :global(p) {
+		margin-top: 0;
+		margin-bottom: 1em;
+	}
+
+	.md-container :global(a) {
+		color: #58a6ff;
+		text-decoration: underline;
+	}
+
+	.md-container :global(ul),
+	.md-container :global(ol) {
+		padding-left: 1.5em;
+		margin-bottom: 1em;
+	}
+
+	.md-container :global(blockquote) {
+		margin: 0 0 1em 0;
+		padding: 0 1em;
+		color: #8b949e;
+		border-left: 0.25em solid #30363d;
+	}
+
+	.md-container :global(code) {
+		padding: 0.2em 0.4em;
+		background-color: rgba(110, 118, 129, 0.4);
+		border-radius: 6px;
+		font-size: 85%;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.md-container :global(pre) {
+		padding: 1em;
+		overflow: auto;
+		font-size: 85%;
+		line-height: 1.45;
+		background-color: #161b22;
+		border-radius: 6px;
+		margin-bottom: 1em;
+	}
+
+	.md-container :global(pre code) {
+		padding: 0;
+		background-color: transparent;
 	}
 
 	.none {
