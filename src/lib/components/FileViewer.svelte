@@ -5,6 +5,7 @@
 	import { toast } from '$lib/toast.js';
 	import * as pdfjsLib from 'pdfjs-dist';
 	import { marked } from 'marked';
+	import Papa from 'papaparse';
 
 	pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
@@ -19,6 +20,10 @@
 	// Markdown state
 	let mdHtml = $state('');
 	let mdError = $state('');
+
+	// CSV state
+	let csvData = $state([]);
+	let csvError = $state('');
 
 	async function save() {
 		try {
@@ -127,11 +132,47 @@
 				const text = await res.text();
 				if (cancelled) return;
 
-				// Parse Markdown to HTML
 				mdHtml = await marked.parse(text);
 			} catch (e) {
 				console.error('Markdown Preview Error:', e);
 				if (!cancelled) mdError = e.message;
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	// CSV Fetch and Parse Effect
+	$effect(() => {
+		const isCsv = file?.mimetype === 'text/csv' || file?.name?.endsWith('.csv');
+		if (!isCsv || !href) return;
+
+		csvError = '';
+		csvData = [];
+		let cancelled = false;
+
+		(async () => {
+			try {
+				const res = await fetch(href, { credentials: 'include' });
+				if (!res.ok) throw new Error(`Failed to fetch CSV: ${res.statusText}`);
+
+				const text = await res.text();
+				if (cancelled) return;
+
+				Papa.parse(text, {
+					skipEmptyLines: true,
+					complete: (results) => {
+						if (!cancelled) csvData = results.data;
+					},
+					error: (err) => {
+						if (!cancelled) csvError = err.message;
+					}
+				});
+			} catch (e) {
+				console.error('CSV Preview Error:', e);
+				if (!cancelled) csvError = e.message;
 			}
 		})();
 
@@ -171,6 +212,36 @@
 					</div>
 				{:else}
 					<p class="none">Loading Markdown...</p>
+				{/if}
+			</div>
+		{:else if file?.mimetype === 'text/csv' || file?.name?.endsWith('.csv')}
+			<!-- CSV Table Preview -->
+			<div class="wide-wrapper">
+				{#if csvError}
+					<p class="none">Couldn't preview CSV — use Download.</p>
+				{:else if csvData.length > 0}
+					<div class="table-container">
+						<table>
+							<thead>
+								<tr>
+									{#each csvData[0] as headerCell}
+										<th>{headerCell}</th>
+									{/each}
+								</tr>
+							</thead>
+							<tbody>
+								{#each csvData.slice(1) as row}
+									<tr>
+										{#each row as cell}
+											<td>{cell}</td>
+										{/each}
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{:else}
+					<p class="none">Loading CSV...</p>
 				{/if}
 			</div>
 		{:else}
@@ -250,10 +321,10 @@
 		margin: auto;
 	}
 
-	/* Shared Wide Container for JSON & Markdown */
+	/* Shared Wide Container for JSON, Markdown & CSV */
 	.wide-wrapper {
 		width: 100%;
-		max-width: 900px;
+		max-width: 1000px;
 		height: 100%;
 		display: flex;
 		padding: var(--space-2, 0.5rem);
@@ -300,7 +371,6 @@
 		box-sizing: border-box;
 	}
 
-	/* Typography & elements inside Markdown */
 	.md-container :global(h1),
 	.md-container :global(h2),
 	.md-container :global(h3),
@@ -361,6 +431,47 @@
 	.md-container :global(pre code) {
 		padding: 0;
 		background-color: transparent;
+	}
+
+	/* CSV Table Styles */
+	.table-container {
+		flex: 1;
+		width: 100%;
+		height: 100%;
+		overflow: auto;
+		background: #0d1117;
+		border-radius: 8px;
+		border: 1px solid #30363d;
+		box-sizing: border-box;
+	}
+
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		text-align: left;
+		font-size: 0.875rem;
+		color: #c9d1d9;
+		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	}
+
+	th, td {
+		padding: 10px 14px;
+		border-bottom: 1px solid #21262d;
+		white-space: nowrap;
+	}
+
+	th {
+		position: sticky;
+		top: 0;
+		background: #161b22;
+		color: #f0f6fc;
+		font-weight: 600;
+		border-bottom: 2px solid #30363d;
+		z-index: 1;
+	}
+
+	tr:hover td {
+		background-color: #161b22;
 	}
 
 	.none {
