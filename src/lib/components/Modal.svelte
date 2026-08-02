@@ -145,15 +145,17 @@
 		overflow: auto;
 	}
 	.body--full {
-		flex: 1;
-		min-height: 0;
-		padding: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: #000;
-		border-radius: 0;
-	}
+	flex: 1;
+	min-height: 0;
+	padding: 0;
+	display: flex;
+	/* column: .viewport's flex:1 needs to grow height, not width.
+	   row (the old default) only stretched it sideways; align-items:center
+	   left the vertical axis to shrink to content size. */
+	flex-direction: column;
+	background: #000;
+	border-radius: 0;
+}
 	@keyframes fade-scrim {
 		from {
 			opacity: 0;
