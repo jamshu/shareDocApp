@@ -5,17 +5,15 @@
 	import { toast } from '$lib/toast.js';
 	import * as pdfjsLib from 'pdfjs-dist';
 
-	// import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-
-	// Remove this line:
-// import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-
-// Replace with CDN matching your pdfjs-dist version (e.g., version 4.x or 3.x):
 	pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 	let { file = $bindable(null), href = '', downloadHref = '' } = $props();
 	let canvasEl = $state(null);
 	let pdfError = $state('');
+
+	// JSON state
+	let jsonContent = $state('');
+	let jsonError = $state('');
 
 	async function save() {
 		try {
@@ -25,83 +23,121 @@
 		}
 	}
 
-	// Renders page 1 onto a canvas instead of embedding an iframe. A native
-	// PDF viewer in an iframe is its own document — CSS on the iframe box
-	// can't reach the page rendering inside it, which is why it ignored the
-	// container and showed at native zoom. A canvas is a replaced element
-	// like img, so it picks up img.body's object-fit: contain for free.
+	// PDF Render Effect
 	$effect(() => {
-	if (file?.mimetype !== 'application/pdf' || !href || !canvasEl) return;
-	pdfError = '';
-	let cancelled = false;
-	let loadingTask;
+		if (file?.mimetype !== 'application/pdf' || !href || !canvasEl) return;
+		pdfError = '';
+		let cancelled = false;
+		let loadingTask;
 
-	(async () => {
-		try {
-			const response = await fetch(href, { credentials: 'include' });
-			if (!response.ok) {
-				throw new Error(`Failed to fetch file: ${response.statusText}`);
+		(async () => {
+			try {
+				const response = await fetch(href, { credentials: 'include' });
+				if (!response.ok) {
+					throw new Error(`Failed to fetch file: ${response.statusText}`);
+				}
+				const data = await response.arrayBuffer();
+				if (cancelled) return;
+
+				loadingTask = pdfjsLib.getDocument({
+					data,
+					standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`
+				});
+
+				const pdfDoc = await loadingTask.promise;
+				if (cancelled) return;
+
+				const page = await pdfDoc.getPage(1);
+				if (cancelled) return;
+
+				const scale = Math.max(2, window.devicePixelRatio || 1);
+				const viewport = page.getViewport({ scale });
+
+				canvasEl.width = viewport.width;
+				canvasEl.height = viewport.height;
+
+				await page.render({
+					canvasContext: canvasEl.getContext('2d'),
+					viewport
+				}).promise;
+			} catch (e) {
+				console.error('PDF.js Error:', e);
+				if (!cancelled) pdfError = e.message;
 			}
-			const data = await response.arrayBuffer();
-			if (cancelled) return;
+		})();
 
-			// Store the loading task reference so we can destroy it on cleanup
-			loadingTask = pdfjsLib.getDocument({
-				data,
-				standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`
-			});
+		return () => {
+			cancelled = true;
+			loadingTask?.destroy();
+		};
+	});
 
-			const pdfDoc = await loadingTask.promise;
-			if (cancelled) return;
+	// JSON Fetch and Format Effect
+	$effect(() => {
+		const isJson = file?.mimetype === 'application/json' || file?.name?.endsWith('.json');
+		if (!isJson || !href) return;
 
-			const page = await pdfDoc.getPage(1);
-			if (cancelled) return;
+		jsonError = '';
+		jsonContent = '';
+		let cancelled = false;
 
-			const scale = Math.max(2, window.devicePixelRatio || 1);
-			const viewport = page.getViewport({ scale });
+		(async () => {
+			try {
+				const res = await fetch(href, { credentials: 'include' });
+				if (!res.ok) throw new Error(`Failed to fetch JSON: ${res.statusText}`);
 
-			canvasEl.width = viewport.width;
-			canvasEl.height = viewport.height;
+				const rawData = await res.json();
+				if (cancelled) return;
 
-			await page.render({
-				canvasContext: canvasEl.getContext('2d'),
-				viewport
-			}).promise;
-		} catch (e) {
-			console.error('PDF.js Error:', e);
-			if (!cancelled) pdfError = e.message;
-		}
-	})();
+				jsonContent = JSON.stringify(rawData, null, 2);
+			} catch (e) {
+				console.error('JSON Preview Error:', e);
+				if (!cancelled) jsonError = e.message;
+			}
+		})();
 
-	return () => {
-		cancelled = true;
-		// Destroy the loading task if component unmounts or effect reruns
-		loadingTask?.destroy();
-	};
-
-});
+		return () => {
+			cancelled = true;
+		};
+	});
 </script>
+
 <Modal bind:open={() => !!file, (v) => { if (!v) file = null; }} fullscreen>
 	{#snippet header()}
 		<span class="name">{file?.name}</span>
 		<button class="btn btn--sm btn--secondary" onclick={save}><Download size={15} /> Download</button>
 	{/snippet}
 	<div class="viewport">
-		<div class="phone">
-			{#if file?.mimetype?.startsWith('image/')}
-				<img class="body" src={href} alt={file.name} />
-			{:else if file?.mimetype === 'application/pdf'}
-				{#if pdfError}
-					<p class="none">Couldn't preview this PDF — use Download.</p>
+		{#if file?.mimetype === 'application/json' || file?.name?.endsWith('.json')}
+			<div class="json-wrapper">
+				{#if jsonError}
+					<p class="none">Couldn't preview JSON — use Download.</p>
+				{:else if jsonContent}
+					<div class="json-container">
+						<pre><code>{jsonContent}</code></pre>
+					</div>
 				{:else}
-					<canvas class="body" bind:this={canvasEl}></canvas>
-				{/if}	
-			{:else}
-				<p class="none">No preview available — use Download.</p>
-			{/if}
-		</div>
+					<p class="none">Loading JSON...</p>
+				{/if}
+			</div>
+		{:else}
+			<div class="phone">
+				{#if file?.mimetype?.startsWith('image/')}
+					<img class="body" src={href} alt={file.name} />
+				{:else if file?.mimetype === 'application/pdf'}
+					{#if pdfError}
+						<p class="none">Couldn't preview this PDF — use Download.</p>
+					{:else}
+						<canvas class="body" bind:this={canvasEl}></canvas>
+					{/if}
+				{:else}
+					<p class="none">No preview available — use Download.</p>
+				{/if}
+			</div>
+		{/if}
 	</div>
 </Modal>
+
 <style>
 	.name {
 		flex: 1;
@@ -112,15 +148,7 @@
 		font-size: var(--fs-md);
 		font-weight: 600;
 	}
-	/* fills the remaining modal space and centers the phone box inside it.
-	   align-items: stretch (not center) — a flex item only gets stretched
-	   when its cross-size is auto; .phone previously set an explicit
-	   height:100%, which opted out of stretch and relied on percentage
-	   resolution instead, which was coming up short on iPhone even after
-	   width was already correct.
-	   max-height is a real-viewport cap: iOS Safari's 100vh is measured with
-	   the address bar hidden, taller than what's visible once it's showing;
-	   svh always reflects the true visible area. */
+
 	.viewport {
 		flex: 1;
 		min-width: 0;
@@ -133,10 +161,7 @@
 		max-height: 100vh;
 		max-height: 100svh;
 	}
-	/* locks a portrait phone ratio (~9:19.5, roughly iPhone Pro Max) as a
-	   simulated frame on larger screens. height:auto (was 100%) lets the
-	   align-items:stretch above size this box from real flex layout instead
-	   of percentage resolution; max-height still caps it at phone size. */
+
 	.phone {
 		height: auto;
 		min-height: 0;
@@ -148,9 +173,7 @@
 		display: flex;
 		overflow: hidden;
 	}
-	/* real phone screens: nothing to simulate, so fill the actual available
-	   width rather than deriving a narrower one from aspect-ratio. Height
-	   still comes from stretch above — only the width formula changes here. */
+
 	@media (max-width: 430px) {
 		.phone {
 			width: 100%;
@@ -158,26 +181,7 @@
 			aspect-ratio: auto;
 		}
 	}
-	/* fit to the phone box in both directions: width:100% would upscale small
-	   images, and on a tall one it forces the box wide so max-height squashes it.
-	   min-width/min-height: 0 override the flex-item default (min-width: auto),
-	   which for a replaced element resolves to its *intrinsic* size — without
-	   this, a high-res image forces the flex container (and modal) to grow. */
-	img.body {
-		flex: 1;
-		min-width: 0;
-		min-height: 0;
-		max-width: 100%;
-		max-height: 100%;
-		width: auto;
-		height: auto;
-		object-fit: contain;
-		display: block;
-		margin: auto;
-	}
-	/* object-fit does nothing on an iframe — it just fills the flex area.
-	   Same min-size trap applies: without min-height: 0 a large PDF's
-	   rendered content can push the iframe (and its ancestors) taller. */
+
 	img.body,
 	canvas.body {
 		flex: 1;
@@ -191,10 +195,42 @@
 		display: block;
 		margin: auto;
 	}
+
+	/* Wide JSON Container Styles */
+	.json-wrapper {
+		width: 100%;
+		max-width: 900px;
+		height: 100%;
+		display: flex;
+		padding: var(--space-2, 0.5rem);
+		box-sizing: border-box;
+	}
+
+	.json-container {
+		flex: 1;
+		width: 100%;
+		height: 100%;
+		overflow: auto;
+		padding: var(--space-4, 1rem);
+		background: #111827;
+		color: #38bdf8;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.875rem;
+		line-height: 1.5;
+		text-align: left;
+		border-radius: 8px;
+		box-sizing: border-box;
+	}
+
+	.json-container pre {
+		margin: 0;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
 	.none {
 		margin: auto;
 		padding: var(--space-8);
 		color: #fff;
 	}
-	
 </style>
