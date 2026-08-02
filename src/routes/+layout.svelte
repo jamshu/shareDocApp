@@ -124,17 +124,17 @@
 			<a href="{base}/" class="brand"><Files size={20} /> ShareDoc</a>
 			<nav>
 				<a href="{base}/" class:active={$page.url.pathname === `${base}/`}>
-					<FileText size={16} /><span>Notes</span>
+					<FileText size={24} /><span>Notes</span>
 				</a>
 				<a href="{base}/docs" class:active={$page.url.pathname.startsWith(`${base}/docs`)}>
-					<FolderOpen size={16} /><span>Docs</span>
+					<FolderOpen size={24} /><span>Docs</span>
 				</a>
 				<a href="{base}/groups" class:active={$page.url.pathname.startsWith(`${base}/groups`)}>
-					<Users size={16} /><span>Groups</span>
+					<Users size={24} /><span>Groups</span>
 				</a>
 				{#if $user.role === 'admin'}
 					<a href="{base}/admin" class:active={$page.url.pathname.startsWith(`${base}/admin`)}>
-						<Shield size={16} /><span>Admin</span>
+						<Shield size={24} /><span>Admin</span>
 					</a>
 				{/if}
 			</nav>
