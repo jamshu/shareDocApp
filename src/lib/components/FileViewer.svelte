@@ -3,9 +3,20 @@
 	import { Download } from 'lucide-svelte';
 	import { downloadFile } from '$lib/download.js';
 	import { toast } from '$lib/toast.js';
-	// file: { name, mimetype } — set to null to close. href/downloadHref are the
-	// caller's api routes, since documents and attachments live behind different ones.
+	import * as pdfjsLib from 'pdfjs-dist';
+
+	// import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+	// Remove this line:
+// import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+// Replace with CDN matching your pdfjs-dist version (e.g., version 4.x or 3.x):
+	pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
 	let { file = $bindable(null), href = '', downloadHref = '' } = $props();
+	let canvasEl = $state(null);
+	let pdfError = $state('');
+
 	async function save() {
 		try {
 			await downloadFile(downloadHref, file.name);
@@ -13,6 +24,62 @@
 			toast.error(e.message);
 		}
 	}
+
+	// Renders page 1 onto a canvas instead of embedding an iframe. A native
+	// PDF viewer in an iframe is its own document — CSS on the iframe box
+	// can't reach the page rendering inside it, which is why it ignored the
+	// container and showed at native zoom. A canvas is a replaced element
+	// like img, so it picks up img.body's object-fit: contain for free.
+	$effect(() => {
+	if (file?.mimetype !== 'application/pdf' || !href || !canvasEl) return;
+	pdfError = '';
+	let cancelled = false;
+	let loadingTask;
+
+	(async () => {
+		try {
+			const response = await fetch(href, { credentials: 'include' });
+			if (!response.ok) {
+				throw new Error(`Failed to fetch file: ${response.statusText}`);
+			}
+			const data = await response.arrayBuffer();
+			if (cancelled) return;
+
+			// Store the loading task reference so we can destroy it on cleanup
+			loadingTask = pdfjsLib.getDocument({
+				data,
+				standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`
+			});
+
+			const pdfDoc = await loadingTask.promise;
+			if (cancelled) return;
+
+			const page = await pdfDoc.getPage(1);
+			if (cancelled) return;
+
+			const scale = Math.max(2, window.devicePixelRatio || 1);
+			const viewport = page.getViewport({ scale });
+
+			canvasEl.width = viewport.width;
+			canvasEl.height = viewport.height;
+
+			await page.render({
+				canvasContext: canvasEl.getContext('2d'),
+				viewport
+			}).promise;
+		} catch (e) {
+			console.error('PDF.js Error:', e);
+			if (!cancelled) pdfError = e.message;
+		}
+	})();
+
+	return () => {
+		cancelled = true;
+		// Destroy the loading task if component unmounts or effect reruns
+		loadingTask?.destroy();
+	};
+
+});
 </script>
 <Modal bind:open={() => !!file, (v) => { if (!v) file = null; }} fullscreen>
 	{#snippet header()}
@@ -24,8 +91,11 @@
 			{#if file?.mimetype?.startsWith('image/')}
 				<img class="body" src={href} alt={file.name} />
 			{:else if file?.mimetype === 'application/pdf'}
-				<!-- ponytail: iOS iframe shows only page 1 of PDFs; Download covers the rest -->
-				<iframe class="body" src={href} title={file.name}></iframe>
+				{#if pdfError}
+					<p class="none">Couldn't preview this PDF — use Download.</p>
+				{:else}
+					<canvas class="body" bind:this={canvasEl}></canvas>
+				{/if}	
 			{:else}
 				<p class="none">No preview available — use Download.</p>
 			{/if}
@@ -108,13 +178,18 @@
 	/* object-fit does nothing on an iframe — it just fills the flex area.
 	   Same min-size trap applies: without min-height: 0 a large PDF's
 	   rendered content can push the iframe (and its ancestors) taller. */
-	iframe.body {
+	img.body,
+	canvas.body {
 		flex: 1;
 		min-width: 0;
 		min-height: 0;
-		width: 100%;
-		border: none;
-		background: #fff;
+		max-width: 100%;
+		max-height: 100%;
+		width: auto;
+		height: auto;
+		object-fit: contain;
+		display: block;
+		margin: auto;
 	}
 	.none {
 		margin: auto;
