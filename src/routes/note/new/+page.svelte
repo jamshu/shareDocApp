@@ -20,7 +20,8 @@
 		const base = (t.split('\n')[0].trim() || t.trim());
 		const sentence = (base.split(/(?<=[.!?])\s/)[0] || base).trim();
 		if (!sentence) return 'Untitled note';
-		return sentence.length > 50 ? sentence.slice(0, 50).trim() + '…' : sentence;
+		// title = first 2 words
+		return sentence.split(/\s+/).slice(0, 2).join(' ');
 	}
 
 	let text = $state('');
