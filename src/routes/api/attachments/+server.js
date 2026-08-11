@@ -27,9 +27,15 @@ export async function POST({ request, cookies }) {
 	try {
 		assertConfigured();
 		const { sid, ctx } = await requireApprovedUser(cookies);
-		const { commentId, name, mimetype, dataBase64 } = await request.json();
+		// A large upload arriving truncated (flaky network) makes request.json() throw.
+		const body = await request.json().catch(() => null);
+		if (!body) return json({ ok: false, error: 'Upload was interrupted — please try again' }, { status: 400 });
+		const { commentId, name, mimetype, dataBase64 } = body;
 		if (!commentId || !name || !dataBase64) {
 			return json({ ok: false, error: 'commentId, name and dataBase64 required' }, { status: 400 });
+		}
+		if (dataBase64.length > 34_000_000) { // ~25MB binary (base64 ≈ 4/3)
+			return json({ ok: false, error: 'File too large (max 25MB)' }, { status: 413 });
 		}
 		const id = await userCall(cookies, sid, ctx, 'ir.attachment', 'create', [{
 			name,

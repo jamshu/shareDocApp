@@ -1,42 +1,55 @@
-# sv
+# ShareDoc
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Family notes + document vault. SvelteKit PWA on **Cloudflare Workers**, Odoo 19 backend.
 
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
+## Develop
 
 ```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.16.2 create --template minimal --no-types --install npm .
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
-
-To create a production version of your app:
+## Deploy (Cloudflare Workers)
 
 ```sh
-npm run build
+npm run deploy          # vite build && wrangler deploy
 ```
 
-You can preview the production build with `npm run preview`.
+Config lives in [`wrangler.toml`](wrangler.toml) — Worker name `sharedoc`, custom domain
+`sharedoc.deedapp.net` (change the `routes` line for a different subdomain).
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+### Secrets (set once, not in wrangler.toml)
+
+```sh
+wrangler secret put ODOO_URL
+wrangler secret put ODOO_DB
+wrangler secret put ODOO_USERNAME
+wrangler secret put ODOO_API_KEY
+wrangler secret put ODOO_MODEL
+wrangler secret put DOCS_ALLOWED_COMPANY_IDS      # optional
+wrangler secret put PUBLIC_VAPID_PUBLIC_KEY       # web push (also a secret — served at runtime)
+wrangler secret put VAPID_PRIVATE_KEY
+wrangler secret put VAPID_SUBJECT
+```
+
+### One-time zone setting
+
+Cloudflare dashboard → **SSL/TLS → Edge Certificates → Always Use HTTPS: On**. Without it the
+`Secure` session cookie is dropped over http and every `/api` call returns 401 after login.
+
+## iPhone / Siri shortcut (quick-create a note)
+
+The app exposes a deep-link page `/note/new` that runs under your logged-in session:
+
+- `https://sharedoc.deedapp.net/note/new?q=<text>&go=1` — create immediately, open the note
+- `https://sharedoc.deedapp.net/note/new?q=<text>` — prefill, tap **Create note**
+
+Build the Shortcut: **Shortcuts app → + → Add Action → *Open URLs*** →
+`https://sharedoc.deedapp.net/note/new?q=` followed by a *Dictated Text* / *Ask for Input*
+variable, then `&go=1`. Rename it (e.g. "New ShareDoc note") and "Add to Siri". You must be
+logged into the PWA in Safari first (auth is cookie-based).
+
+## Uploads
+
+Files store base64 in Odoo; cap is **25MB** per file (client + server). For larger files switch
+the storage path to Cloudflare R2 with streaming.

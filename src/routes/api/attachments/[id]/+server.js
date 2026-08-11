@@ -20,7 +20,8 @@ export async function GET({ params, cookies, url }) {
 		refreshSessionCookie(cookies, sessionId, sid);
 		const att = result?.[0];
 		if (!att?.raw) return new Response('Not found', { status: 404 });
-		const bytes = Buffer.from(att.raw, 'base64');
+		// atob/Uint8Array, not Buffer — Buffer is absent on the Workers runtime.
+		const bytes = Uint8Array.from(atob(att.raw), (c) => c.charCodeAt(0));
 		const disp = url.searchParams.has('download') ? 'attachment' : 'inline';
 		return new Response(bytes, {
 			headers: {

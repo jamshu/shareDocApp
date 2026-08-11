@@ -31,6 +31,7 @@
 	let loading = $state(true);
 	let filesLoading = $state(false);
 	let uploading = $state(false);
+	let dragActive = $state(false);
 	let error = $state('');
 	let viewerFile = $state(null);
 	// folder and file ids are separate spaces, so the open menu is namespaced: d:<id> / f:<id>
@@ -103,17 +104,31 @@
 		}
 	}
 
-	const MAX_UPLOAD = 4 * 1024 * 1024; // Vercel serverless JSON body cap
+	const MAX_UPLOAD = 25 * 1024 * 1024; // 25MB — Workers body limit is far higher; capped for Worker memory
 
-	async function onPick(ev) {
+	function onPick(ev) {
 		const picked = [...ev.target.files];
 		ev.target.value = '';
+		processFiles(picked);
+	}
+
+	function onDrop(ev) {
+		ev.preventDefault();
+		dragActive = false;
+		if (!currentId) {
+			toast.error('Open a folder first, then drop files into it');
+			return;
+		}
+		processFiles([...ev.dataTransfer.files]);
+	}
+
+	async function processFiles(picked) {
 		if (!picked.length || !currentId) return;
 		uploading = true;
 		error = '';
 		try {
 			for (const file of picked) {
-				if (file.size > MAX_UPLOAD) throw new Error(`${file.name} is over 4MB`);
+				if (file.size > MAX_UPLOAD) throw new Error(`${file.name} is over 25MB`);
 				const dataBase64 = await new Promise((res, rej) => {
 					const r = new FileReader();
 					r.onload = () => res(r.result.split(',')[1]);
@@ -320,21 +335,33 @@
 	{@render folderSkeletons()}
 	{@render fileSkeletons()}
 {:else if currentId}
-	<!-- Inside a folder: all children folders + all files, regardless of owner -->
-	{#if children.length}
-		<div class="folder-grid">
-			{#each children as f, i (f.id)}{@render folderCard(f, i)}{/each}
-		</div>
-	{/if}
-	{#if filesLoading}
-		{@render fileSkeletons()}
-	{:else if files.length}
-		<div class="file-list">
-			{#each files as f (f.id)}{@render fileRow(f)}{/each}
-		</div>
-	{:else if !children.length}
-		<p class="muted">Empty folder — upload something (max 4MB per file).</p>
-	{/if}
+	<!-- Inside a folder: all children folders + all files, regardless of owner.
+	     Drop zone for desktop drag-and-drop upload. -->
+	<div
+		class="drop-zone"
+		class:drag-active={dragActive}
+		role="region"
+		aria-label="Drop files here to upload"
+		ondragover={(e) => { e.preventDefault(); dragActive = true; }}
+		ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) dragActive = false; }}
+		ondrop={onDrop}
+	>
+		{#if children.length}
+			<div class="folder-grid">
+				{#each children as f, i (f.id)}{@render folderCard(f, i)}{/each}
+			</div>
+		{/if}
+		{#if filesLoading}
+			{@render fileSkeletons()}
+		{:else if files.length}
+			<div class="file-list">
+				{#each files as f (f.id)}{@render fileRow(f)}{/each}
+			</div>
+		{:else if !children.length}
+			<p class="muted">Empty folder — upload or drag files here (max 25MB per file).</p>
+		{/if}
+		{#if dragActive}<div class="drop-overlay">Drop to upload</div>{/if}
+	</div>
 {:else}
 	<!-- Root: My Drive (mine, private by default) + Shared with me -->
 	<div class="section-title"><Folder size={15} /> My Drive</div>
@@ -399,6 +426,29 @@
 />
 
 <style>
+	.drop-zone {
+		position: relative;
+		border: 2px dashed transparent;
+		border-radius: var(--radius-lg, 12px);
+		transition: border-color 0.15s, background 0.15s;
+		min-height: 120px;
+	}
+	.drop-zone.drag-active {
+		border-color: var(--accent);
+		background: var(--accent-soft, rgba(120, 120, 255, 0.08));
+	}
+	.drop-overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-weight: 600;
+		color: var(--accent);
+		background: var(--accent-soft, rgba(120, 120, 255, 0.12));
+		border-radius: var(--radius-lg, 12px);
+		pointer-events: none;
+	}
 	.head-row {
 		display: flex;
 		align-items: center;

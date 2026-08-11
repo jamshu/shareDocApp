@@ -27,7 +27,8 @@ export async function GET({ params, cookies, url }) {
 		]);
 		const doc = rows?.[0];
 		if (!doc?.datas) return new Response('Not found', { status: 404 });
-		const bytes = Buffer.from(doc.datas, 'base64');
+		// atob/Uint8Array, not Buffer — Buffer is absent on the Workers runtime.
+		const bytes = Uint8Array.from(atob(doc.datas), (c) => c.charCodeAt(0));
 		const disp = url.searchParams.has('download') ? 'attachment' : 'inline';
 		return new Response(bytes, {
 			headers: {

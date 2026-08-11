@@ -53,9 +53,15 @@ export async function POST({ request, cookies }) {
 	try {
 		assertConfigured();
 		const { sid, ctx } = await requireDocsUser(cookies);
-		const { folderId, name, mimetype, dataBase64 } = await request.json();
+		// A large upload arriving truncated (flaky network) makes request.json() throw.
+		const body = await request.json().catch(() => null);
+		if (!body) return json({ ok: false, error: 'Upload was interrupted — please try again' }, { status: 400 });
+		const { folderId, name, mimetype, dataBase64 } = body;
 		if (!folderId || !name || !dataBase64) {
 			return json({ ok: false, error: 'folderId, name and dataBase64 required' }, { status: 400 });
+		}
+		if (dataBase64.length > 34_000_000) { // ~25MB binary (base64 ≈ 4/3)
+			return json({ ok: false, error: 'File too large (max 25MB)' }, { status: 413 });
 		}
 		// Verified on this instance (scripts/setup-odoo.js): documents.document
 		// accepts base64 'datas' on create — unlike ir.attachment, where Odoo 19
