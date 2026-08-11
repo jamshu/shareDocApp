@@ -12,7 +12,16 @@
 	import { page } from '$app/stores';
 	import { user } from '$lib/auth.js';
 	import { odooClient } from '$lib/odoo.js';
+	import { marked } from 'marked';
 	import { PenLine } from 'lucide-svelte';
+
+	// x_name is a short summary; the full dictated text is the markdown body.
+	function summarize(t) {
+		const base = (t.split('\n')[0].trim() || t.trim());
+		const sentence = (base.split(/(?<=[.!?])\s/)[0] || base).trim();
+		if (!sentence) return 'Untitled note';
+		return sentence.length > 50 ? sentence.slice(0, 50).trim() + '…' : sentence;
+	}
 
 	let text = $state('');
 	let auto = $state(false);
@@ -43,10 +52,12 @@
 		creating = true;
 		error = '';
 		try {
-			const title = (text.split('\n')[0] || 'Untitled note').slice(0, 60);
+			const md = text.trim();
 			const id = await odooClient.createRecord({
-				x_name: title,
-				x_studio_notes_md: text,
+				x_name: summarize(md),
+				x_studio_notes_md: md, // markdown source
+				x_studio_notes: marked.parse(md), // rendered html for the read view
+				x_studio_editor_mode: 'md',
 				x_studio_date: new Date().toISOString().slice(0, 10),
 				x_studio_permission: 'owner_edit'
 			});

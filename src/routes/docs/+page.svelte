@@ -31,7 +31,9 @@
 	let loading = $state(true);
 	let filesLoading = $state(false);
 	let uploading = $state(false);
-	let dragActive = $state(false);
+	let dragActive = $state(false); // OS files dragged over (external upload)
+	let draggingFileId = $state(null); // internal file being dragged to a folder
+	let dropFolderId = $state(null); // folder card currently hovered during a move
 	let error = $state('');
 	let viewerFile = $state(null);
 	// folder and file ids are separate spaces, so the open menu is namespaced: d:<id> / f:<id>
@@ -115,11 +117,31 @@
 	function onDrop(ev) {
 		ev.preventDefault();
 		dragActive = false;
+		// Internal file-move drags carry no OS files — ignore them here.
+		if (!ev.dataTransfer.files?.length) return;
 		if (!currentId) {
 			toast.error('Open a folder first, then drop files into it');
 			return;
 		}
 		processFiles([...ev.dataTransfer.files]);
+	}
+
+	// --- Drag a file onto a folder to move it there ---
+	async function moveFile(fileId, folderId) {
+		draggingFileId = null;
+		dropFolderId = null;
+		if (!fileId || folderId === currentId) return; // no-op if already here
+		try {
+			await api(`/api/documents/${fileId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ folder_id: folderId })
+			});
+			files = files.filter((f) => f.id !== fileId); // it left the current view
+			toast.success('Moved');
+		} catch (e) {
+			toast.error(e.message);
+		}
 	}
 
 	async function processFiles(picked) {
@@ -246,17 +268,41 @@
 </div>
 
 <nav class="crumbs" aria-label="Breadcrumb">
-	<button class="crumb" onclick={() => open(null)}><Home size={15} /> All</button>
+	<button
+		class="crumb"
+		class:crumb-drop={dropFolderId === 'root'}
+		onclick={() => open(null)}
+		ondragover={(e) => { if (draggingFileId) { e.preventDefault(); dropFolderId = 'root'; } }}
+		ondragleave={() => { if (dropFolderId === 'root') dropFolderId = null; }}
+		ondrop={(e) => { if (draggingFileId) { e.preventDefault(); moveFile(draggingFileId, null); } }}
+	><Home size={15} /> All</button>
 	{#each crumbs as c (c.id)}
 		<span class="sep">/</span>
-		<button class="crumb" class:current={c.id === currentId} onclick={() => open(c.id)}>{c.name}</button>
+		<button
+			class="crumb"
+			class:current={c.id === currentId}
+			class:crumb-drop={dropFolderId === c.id}
+			onclick={() => open(c.id)}
+			ondragover={(e) => { if (draggingFileId) { e.preventDefault(); dropFolderId = c.id; } }}
+			ondragleave={() => { if (dropFolderId === c.id) dropFolderId = null; }}
+			ondrop={(e) => { if (draggingFileId) { e.preventDefault(); moveFile(draggingFileId, c.id); } }}
+		>{c.name}</button>
 	{/each}
 </nav>
 
 {#if error}<p class="error-text">{error}</p>{/if}
 
 {#snippet folderCard(f, i)}
-	<div class="card card--interactive folder-card fade-in" class:menu-open={menuId === `d:${f.id}`} style="--fade-delay: {i * 0.03}s">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="card card--interactive folder-card fade-in"
+		class:menu-open={menuId === `d:${f.id}`}
+		class:drop-target={dropFolderId === f.id}
+		style="--fade-delay: {i * 0.03}s"
+		ondragover={(e) => { if (draggingFileId) { e.preventDefault(); dropFolderId = f.id; } }}
+		ondragleave={(e) => { if (dropFolderId === f.id && !e.currentTarget.contains(e.relatedTarget)) dropFolderId = null; }}
+		ondrop={(e) => { if (draggingFileId) { e.preventDefault(); e.stopPropagation(); moveFile(draggingFileId, f.id); } }}
+	>
 		<button class="folder-main" onclick={() => open(f.id)}>
 			<Folder size={19} class="folder-ic" />
 			<span class="folder-name">{f.name}</span>
@@ -287,7 +333,19 @@
 
 {#snippet fileRow(f)}
 	{@const Icon = fileIcon(f.mimetype)}
-	<div class="card card--interactive file-row fade-in" class:menu-open={menuId === `f:${f.id}`}>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="card card--interactive file-row fade-in"
+		class:menu-open={menuId === `f:${f.id}`}
+		class:dragging={draggingFileId === f.id}
+		draggable="true"
+		ondragstart={(e) => {
+			draggingFileId = f.id;
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', String(f.id));
+		}}
+		ondragend={() => { draggingFileId = null; dropFolderId = null; }}
+	>
 		<button class="file-main" onclick={() => (viewerFile = f)}>
 			<span class="file-ic"><Icon size={18} /></span>
 			<span class="file-info">
@@ -337,12 +395,17 @@
 {:else if currentId}
 	<!-- Inside a folder: all children folders + all files, regardless of owner.
 	     Drop zone for desktop drag-and-drop upload. -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="drop-zone"
 		class:drag-active={dragActive}
 		role="region"
 		aria-label="Drop files here to upload"
-		ondragover={(e) => { e.preventDefault(); dragActive = true; }}
+		ondragover={(e) => {
+			if (!e.dataTransfer.types.includes('Files')) return; // internal move, not an OS file
+			e.preventDefault();
+			dragActive = true;
+		}}
 		ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) dragActive = false; }}
 		ondrop={onDrop}
 	>
@@ -448,6 +511,23 @@
 		background: var(--accent-soft, rgba(120, 120, 255, 0.12));
 		border-radius: var(--radius-lg, 12px);
 		pointer-events: none;
+	}
+	/* Drag a file onto a folder / breadcrumb to move it there */
+	.file-row[draggable='true'] {
+		cursor: grab;
+	}
+	.file-row.dragging {
+		opacity: 0.4;
+	}
+	.folder-card.drop-target {
+		border-color: var(--accent);
+		background: var(--accent-soft, rgba(120, 120, 255, 0.12));
+		box-shadow: 0 0 0 2px var(--accent) inset;
+	}
+	.crumb.crumb-drop {
+		background: var(--accent);
+		color: var(--on-accent, #fff);
+		border-radius: var(--radius-sm, 6px);
 	}
 	.head-row {
 		display: flex;

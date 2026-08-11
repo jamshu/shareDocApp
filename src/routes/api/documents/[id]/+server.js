@@ -49,7 +49,7 @@ export async function PATCH({ params, request, cookies }) {
 	try {
 		assertConfigured();
 		const { sid, ctx } = await requireDocsUser(cookies);
-		const { name, access_internal } = await request.json();
+		const { name, access_internal, folder_id } = await request.json();
 		const vals = {};
 		if (name !== undefined) {
 			if (!name?.trim()) return json({ ok: false, error: 'name required' }, { status: 400 });
@@ -60,6 +60,10 @@ export async function PATCH({ params, request, cookies }) {
 				return json({ ok: false, error: 'invalid access_internal' }, { status: 400 });
 			}
 			vals.access_internal = access_internal;
+		}
+		// Move to another folder (drag-and-drop). null/false/'root' -> My Drive root.
+		if (folder_id !== undefined) {
+			vals.folder_id = folder_id && folder_id !== 'root' ? Number(folder_id) : false;
 		}
 		if (!Object.keys(vals).length) return json({ ok: false, error: 'nothing to update' }, { status: 400 });
 		await userCall(cookies, sid, ctx, 'documents.document', 'write', [[Number(params.id)], vals]);
