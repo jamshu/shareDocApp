@@ -1,13 +1,58 @@
 <script>
+	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { user } from '$lib/auth.js';
 	import { unsubscribePush } from '$lib/push.js';
+	import { toast } from '$lib/toast.js';
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
-	import { TriangleAlert, User, Building2, Mail } from 'lucide-svelte';
+	import { TriangleAlert, Building2, Mail, Smartphone, Copy } from 'lucide-svelte';
 
 	let password = $state('');
 	let busy = $state(false);
 	let error = $state('');
+
+	// iPhone/Siri upload shortcut URL (token in the query string).
+	let uploadUrl = $state('');
+	let linkLoading = $state(true);
+	let linkErr = $state('');
+
+	onMount(async () => {
+		try {
+			const d = await (await fetch(`${base}/api/inbox/link`)).json();
+			if (!d.ok) throw new Error(d.error);
+			uploadUrl = d.url;
+		} catch (e) {
+			linkErr = e.message;
+		} finally {
+			linkLoading = false;
+		}
+	});
+
+	async function copyUrl() {
+		try {
+			await navigator.clipboard.writeText(uploadUrl);
+			toast.success('Copied');
+		} catch {
+			toast.error('Copy failed — long-press to select');
+		}
+	}
+
+	async function regenerate() {
+		try {
+			const d = await (
+				await fetch(`${base}/api/inbox/link`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ rotate: true })
+				})
+			).json();
+			if (!d.ok) throw new Error(d.error);
+			uploadUrl = d.url;
+			toast.success('New link generated — old one revoked');
+		} catch (e) {
+			toast.error(e.message);
+		}
+	}
 
 	async function deleteAccount() {
 		if (!password) {
@@ -50,6 +95,37 @@
 			<span class="chip chip--accent">{$user?.role === 'admin' ? 'admin' : 'member'}</span>
 		</div>
 	</div>
+</div>
+
+<div class="section-title"><Smartphone size={15} /> iPhone upload shortcut</div>
+<div class="card shortcut-card">
+	<p class="muted" style="margin:0 0 12px;">
+		Upload any file straight to your <strong>Inbox</strong> folder from iPhone. In the Shortcuts
+		app: <em>Select File</em> → <em>Get Contents of URL</em> (Method <strong>POST</strong>, Request
+		Body → <strong>File</strong>). Use this URL — add <code>&amp;name=</code> then the file's
+		<em>Name</em> variable to keep the real filename.
+	</p>
+	{#if linkLoading}
+		<p class="muted">Loading…</p>
+	{:else if linkErr}
+		<p class="error-text">{linkErr}</p>
+	{:else}
+		<input
+			class="input"
+			readonly
+			value={uploadUrl}
+			onclick={(e) => e.currentTarget.select()}
+			aria-label="Upload shortcut URL"
+		/>
+		<div class="row">
+			<button class="btn btn--secondary" onclick={copyUrl}><Copy size={15} /> Copy</button>
+			<ConfirmButton
+				label="Regenerate"
+				confirmLabel="Revoke old link & make new?"
+				onconfirm={regenerate}
+			/>
+		</div>
+	{/if}
 </div>
 
 <div class="section-title"><TriangleAlert size={15} /> Danger zone</div>
@@ -125,6 +201,14 @@
 	.row {
 		display: flex;
 		justify-content: flex-end;
+		gap: var(--space-2);
 		margin-top: var(--space-3);
+	}
+	.shortcut-card {
+		padding: var(--space-4);
+	}
+	.shortcut-card code {
+		font-family: var(--font-mono, monospace);
+		font-size: 0.85em;
 	}
 </style>

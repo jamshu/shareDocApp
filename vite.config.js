@@ -26,6 +26,24 @@ export default defineConfig({
 				description: 'Family notes and documents — share, upload, download.',
 				start_url: '/',
 				scope: '/',
+				// Android Web Share Target: makes ShareDoc appear in the OS share
+				// sheet (e.g. WhatsApp → Share). The file POSTs to /api/share, which
+				// stores it in My Drive. iOS Safari does not support share_target.
+				share_target: {
+					action: '/api/share',
+					method: 'POST',
+					enctype: 'multipart/form-data',
+					params: {
+						title: 'title',
+						text: 'text',
+						files: [
+							{
+								name: 'files',
+								accept: ['image/*', 'video/*', 'audio/*', 'application/pdf', 'text/*', 'application/*']
+							}
+						]
+					}
+				},
 				display: 'standalone',
 				orientation: 'portrait',
 				background_color: '#0a0a0a',

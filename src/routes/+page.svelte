@@ -19,7 +19,12 @@
 	let mine = $derived(notes.filter((n) => n.create_uid?.[0] === $user?.uid));
 	let shared = $derived(notes.filter((n) => n.create_uid?.[0] !== $user?.uid));
 
-	onMount(load);
+	// Siri shortcut: /?q=<dictated text> lands here and runs the search.
+	onMount(() => {
+		const q = new URLSearchParams(location.search).get('q');
+		if (q) query = q.trim();
+		load();
+	});
 
 	// searches title + rendered html + markdown source server-side
 	const searchDomain = (q) => [

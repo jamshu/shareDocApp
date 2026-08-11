@@ -121,6 +121,8 @@ async function main() {
 	const [usersModel] = await x('ir.model', 'search', [[['model', '=', 'res.users']]]);
 	await ensureField(usersModel, 'res.users', { name: 'x_studio_org_role', ttype: 'char' });
 	await ensureField(usersModel, 'res.users', { name: 'x_studio_org_status', ttype: 'char' });
+	// Per-user bearer token for the iPhone/Siri upload shortcut (/api/inbox).
+	await ensureField(usersModel, 'res.users', { name: 'x_studio_upload_token', ttype: 'char' });
 
 	/* ---- access rights (authorization is enforced in the app's /api proxy) ---- */
 	console.log('Access rights:');

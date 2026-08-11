@@ -3,7 +3,7 @@
 // Throws 401/403-tagged Errors; API routes convert to responses.
 import { env } from '$env/dynamic/private';
 import { getSession, getContext, setContextCookie, refreshSessionCookie } from './session.js';
-import { sessionInfo, buildSessionContext, getUserOrgInfo } from './odoo.js';
+import { sessionInfo, buildSessionContext, getUserOrgInfo, adminExecute } from './odoo.js';
 
 /**
  * Returns { uid, sid, ctx } where ctx = { lang, tz, uid, allowed_company_ids,
@@ -78,4 +78,40 @@ export async function requireDocsUser(cookies) {
 /** Back-compat helper used by push subscribe route. */
 export async function requireUid(cookies) {
 	return (await requireUser(cookies)).uid;
+}
+
+/**
+ * Cookie-less gate for the iPhone/Siri upload shortcut (/api/inbox). Resolves a
+ * per-user bearer token (res.users.x_studio_upload_token) to the user via the
+ * admin key, then applies the same approval + Documents-company gates as
+ * requireDocsUser. Returns { uid, companyId }.
+ */
+export async function requireTokenUser(token) {
+	const t = String(token || '').trim();
+	// UUID shape (crypto.randomUUID). Cheap reject before hitting Odoo.
+	if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) {
+		const e = new Error('Invalid token');
+		e.status = 401;
+		throw e;
+	}
+	const ids = await adminExecute('res.users', 'search', [[['x_studio_upload_token', '=', t]]]);
+	if (!ids.length) {
+		const e = new Error('Invalid token');
+		e.status = 401;
+		throw e;
+	}
+	const uid = ids[0];
+	const org = await getUserOrgInfo(uid);
+	if (org.status !== 'approved') {
+		const e = new Error('Account not approved');
+		e.status = 403;
+		throw e;
+	}
+	const allowed = (env.DOCS_ALLOWED_COMPANY_IDS || '1').split(',').map(Number);
+	if (!allowed.includes(org.companyId)) {
+		const e = new Error('Documents are not available for your organization');
+		e.status = 403;
+		throw e;
+	}
+	return { uid, companyId: org.companyId };
 }

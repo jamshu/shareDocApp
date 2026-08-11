@@ -49,6 +49,15 @@ Build the Shortcut: **Shortcuts app → + → Add Action → *Open URLs*** →
 variable, then `&go=1`. Rename it (e.g. "New ShareDoc note") and "Add to Siri". You must be
 logged into the PWA in Safari first (auth is cookie-based).
 
+### Search notes by voice
+
+Same idea, different URL — opens the notes list filtered to what you dictate:
+
+- `https://sharedoc.deedapp.net/?q=<text>`
+
+Shortcut: **Open URLs** → `https://sharedoc.deedapp.net/?q=` + a *Dictated Text* variable. Name it
+"Search ShareDoc", Add to Siri. Searches note titles + body.
+
 ## Uploads
 
 Files store base64 in Odoo; cap is **25MB** per file (client + server). For larger files switch
