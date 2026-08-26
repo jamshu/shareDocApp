@@ -8,6 +8,7 @@
 	import ConfirmButton from '$lib/components/ConfirmButton.svelte';
 	import FileViewer from '$lib/components/FileViewer.svelte';
 	import { toast } from '$lib/toast.js';
+	import { downloadBlob } from '$lib/download.js';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 	import TurndownService from 'turndown';
@@ -135,6 +136,69 @@
 		rendered; // re-decorate whenever the rendered html is replaced
 		if (mdViewEl) decorateCodeBlocks(mdViewEl);
 	});
+
+	// export panel
+	let exportOpen = $state(false);
+	let exportComments = $state(true);
+
+	const getNoteMD = () => (editorMode === 'md' ? src : htmlToMarkdown(src));
+
+	function exportMarkdown() {
+		const title = note.x_name || 'note';
+		let md = `# ${title}\n\n${getNoteMD()}`;
+		if (exportComments && comments.length) {
+			md += '\n\n---\n\n## Comments\n\n';
+			md += comments
+				.map((c) => {
+					const author = c.create_uid?.[1] || 'Unknown';
+					const date = fmtWhen(c.create_date);
+					return `**${author}** — ${date}\n\n${htmlToText(c.x_studio_body)}`;
+				})
+				.join('\n\n---\n\n');
+		}
+		downloadBlob(new Blob([md], { type: 'text/markdown' }), `${title}.md`);
+		exportOpen = false;
+	}
+
+	function exportPDF() {
+		const title = note.x_name || 'Note';
+		const noteHTML = marked.parse(getNoteMD());
+		let commentsHTML = '';
+		if (exportComments && comments.length) {
+			commentsHTML =
+				'<hr><h2>Comments</h2>' +
+				comments
+					.map((c) => {
+						const author = c.create_uid?.[1] || 'Unknown';
+						const date = fmtWhen(c.create_date);
+						return `<div class="comment"><strong>${author}</strong><span class="meta">${date}</span>${DOMPurify.sanitize(c.x_studio_body)}</div>`;
+					})
+					.join('');
+		}
+		const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>
+body{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#111;line-height:1.6}
+h1{font-size:1.8em;margin-bottom:4px}
+pre{background:#f5f5f5;padding:12px;border-radius:4px;overflow:auto}
+code{background:#f5f5f5;padding:2px 4px;border-radius:2px}
+img{max-width:100%}
+.comment{border-left:3px solid #ddd;padding:4px 12px;margin:16px 0}
+.meta{color:#666;font-size:0.85em;margin-left:8px}
+hr{border:none;border-top:1px solid #eee;margin:24px 0}
+@media print{body{margin:0}}
+</style></head><body><h1>${title}</h1>${noteHTML}${commentsHTML}</body></html>`;
+		const blob = new Blob([html], { type: 'text/html' });
+		const url = URL.createObjectURL(blob);
+		const win = window.open(url, '_blank');
+		if (win) {
+			win.addEventListener('load', () => {
+				win.print();
+				setTimeout(() => URL.revokeObjectURL(url), 5000);
+			});
+		} else {
+			URL.revokeObjectURL(url);
+		}
+		exportOpen = false;
+	}
 
 	// share panel
 	let shareOpen = $state(false);
@@ -586,6 +650,7 @@
 		<button class="btn btn--sm" onclick={() => (remOpen = !remOpen)}>
 			⏰ {remPending.length || ''}
 		</button>
+		<button class="btn btn--sm btn--ghost" onclick={() => (exportOpen = !exportOpen)} title="Export note">↓</button>
 		{#if isOwner}
 			<button class="btn btn--sm" onclick={() => (shareOpen = !shareOpen)}>
 				Share ({followerIds.length + groupIds.length})
@@ -749,6 +814,19 @@
 					{/each}
 				{/if}
 			{/if}
+		</div>
+	{/if}
+
+	{#if exportOpen}
+		<div class="card share-panel fade-in">
+			<label class="muted" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+				<input type="checkbox" bind:checked={exportComments} />
+				Include comments
+			</label>
+			<div class="picker" style="margin-top:12px;">
+				<button class="btn btn--sm" onclick={exportMarkdown}>Markdown (.md)</button>
+				<button class="btn btn--sm" onclick={exportPDF}>PDF (print)</button>
+			</div>
 		</div>
 	{/if}
 

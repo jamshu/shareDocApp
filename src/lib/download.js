@@ -21,6 +21,30 @@ function withExt(name, type) {
 	return ext ? `${name}.${ext}` : name;
 }
 
+export async function downloadBlob(blob, filename) {
+	const ios = 'standalone' in window.navigator;
+	const standalone =
+		window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+	const name = withExt(filename, blob.type);
+	if (ios && standalone && navigator.canShare) {
+		const file = new File([blob], name, { type: blob.type });
+		if (navigator.canShare({ files: [file] })) {
+			try {
+				await navigator.share({ files: [file] });
+				return;
+			} catch (e) {
+				if (e.name === 'AbortError') return;
+			}
+		}
+	}
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = name;
+	a.click();
+	URL.revokeObjectURL(url);
+}
+
 export async function downloadFile(url, name) {
 	const ios = 'standalone' in window.navigator; // property exists only on iOS WebKit
 	const standalone =
