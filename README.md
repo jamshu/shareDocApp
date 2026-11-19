@@ -30,6 +30,11 @@ wrangler secret put DOCS_ALLOWED_COMPANY_IDS      # optional
 wrangler secret put PUBLIC_VAPID_PUBLIC_KEY       # web push (also a secret — served at runtime)
 wrangler secret put VAPID_PRIVATE_KEY
 wrangler secret put VAPID_SUBJECT
+wrangler secret put SECRETS_ODOO_URL             # Secrets vault: osecret's Odoo (separate DB)
+wrangler secret put SECRETS_ODOO_DB
+wrangler secret put SECRETS_ODOO_USERNAME
+wrangler secret put SECRETS_ODOO_API_KEY
+wrangler secret put SECRETS_ENCRYPTION_KEY       # same as osecret ENCRYPTION_KEY
 ```
 
 ### One-time zone setting
@@ -89,6 +94,12 @@ Quick test from a shell:
 curl -X POST "https://sharedoc.deedapp.net/api/inbox?token=<token>&name=test.pdf" \
   --data-binary @test.pdf -H "Content-Type: application/pdf"
 ```
+
+## Secrets vault
+
+`/secrets` reads/writes osecret's `x_secrets` model (Fernet, same key as the CLI — both stay
+interoperable). Only users in `DOCS_ALLOWED_COMPANY_IDS`. Values are decrypted server-side only on
+Copy/Show. Check the crypto: `node scripts/fernet-check.mjs`.
 
 ## Uploads
 

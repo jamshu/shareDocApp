@@ -14,6 +14,7 @@
 		Files,
 		FileText,
 		FolderOpen,
+		KeyRound,
 		Users,
 		Shield,
 		Bell,
@@ -128,6 +129,9 @@
 				</a>
 				<a href="{base}/docs" class:active={$page.url.pathname.startsWith(`${base}/docs`)}>
 					<FolderOpen size={36} /><span>Docs</span>
+				</a>
+				<a href="{base}/secrets" class:active={$page.url.pathname.startsWith(`${base}/secrets`)}>
+					<KeyRound size={36} /><span>Secrets</span>
 				</a>
 				<a href="{base}/groups" class:active={$page.url.pathname.startsWith(`${base}/groups`)}>
 					<Users size={36} /><span>Groups</span>
